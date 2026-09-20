@@ -36,6 +36,7 @@ local VOID_NEAR = VOID_CF * CFrame.new(0, 0, 10)
 local cachedCostText, cachedCostNum = "-", nil
 local cachedCoinsText, cachedCoinsNum = "-", nil
 local coinLabelRef = nil
+local lastCoinScan = 0
 local totalRebirths, sessionRebirths = "-", 0
 
 local Status, CoinLbl, CostLbl, TotalLbl, SessionLbl, EtaLbl, AvgLbl, StatusDot
@@ -291,6 +292,94 @@ local function parseAmount(str)
     return num
 end
 
+local function extractBalance(text)
+    if type(text) ~= "string" or text == "" then return nil, nil end
+    local low = text:lower()
+    if low:find("1%s*in") or low:find("in%s*%d") then return nil, nil end
+    if low:find("rebirth") or low:find("luck") or low:find("stock") then return nil, nil end
+    if text:match("^%+") or text:match("^%-") then return nil, nil end
+    if low:find("/") then return nil, nil end
+    local raw = text:match("([%d%.]+%s*[KMBTQqi]+)")
+    if raw then
+        local n = parseAmount(raw)
+        if n and n >= 100 then
+            return raw:gsub("%s+", ""), n
+        end
+    end
+    raw = text:match("([%d,][%d,%.]*)")
+    if raw then
+        local n = parseAmount(raw)
+        if n and n >= 1000 then
+            return raw, n
+        end
+    end
+    return nil, nil
+end
+
+local function coinLooksWrong(n)
+    if not n then return true end
+    if n < 10 then return true end
+    if cachedCostNum and cachedCostNum >= 1e5 and n < 100 then return true end
+    return false
+end
+
+local function scanCoinLabel(force)
+    if not force and coinLabelRef and coinLabelRef.Parent and tick() - lastCoinScan < 6 then
+        local raw, n = extractBalance(coinLabelRef.Text)
+        if n and not coinLooksWrong(n) then
+            cachedCoinsText, cachedCoinsNum = raw, n
+            return
+        end
+        coinLabelRef = nil
+    end
+    lastCoinScan = tick()
+    local best, bestScore, bestRaw, bestNum = nil, -1, nil, nil
+    pcall(function()
+        for _, gui in ipairs(LP.PlayerGui:GetChildren()) do
+            if gui:IsA("ScreenGui") and gui.Name ~= "OsamaHub" then
+                for _, obj in ipairs(gui:GetDescendants()) do
+                    if obj:IsA("TextLabel") or obj:IsA("TextButton") then
+                        local txt = obj.Text or ""
+                        local raw, n = extractBalance(txt)
+                        if n then
+                            local path = obj:GetFullName():lower()
+                            if not path:find("osamahub") and not path:find("billboard") then
+                                local score = 0
+                                if path:find("pixel") then score += 8 end
+                                if path:find("coin") then score += 8 end
+                                if path:find("currency") or path:find("balance") then score += 6 end
+                                if path:find("main") then score += 2 end
+                                if txt:lower():find("pixel") then score += 3 end
+                                if txt:find("[KMBTQqi]") then score += 5 end
+                                if n >= 1e6 then score += 4 elseif n >= 1e3 then score += 2 end
+                                if score > bestScore then
+                                    best, bestScore, bestRaw, bestNum = obj, score, raw, n
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+    if best and bestNum then
+        coinLabelRef = best
+        cachedCoinsText, cachedCoinsNum = bestRaw, bestNum
+    end
+end
+
+local function updateCoins()
+    if coinLabelRef and coinLabelRef.Parent then
+        local raw, n = extractBalance(coinLabelRef.Text)
+        if n and not coinLooksWrong(n) then
+            cachedCoinsText, cachedCoinsNum = raw, n
+            return
+        end
+        coinLabelRef = nil
+    end
+    scanCoinLabel(true)
+end
+
 local function getUpgradeLevel(name)
     local cur, maxLvl = 0, 1
     pcall(function()
@@ -361,40 +450,19 @@ local function updateRebirthCost()
                     cachedCostNum = num
                 end
             end
+            local bal = t:match("([%d%.]+%s*[KMBTQqi]+)%s*Pixel")
+            if bal and not t:match("^%+") then
+                local n = parseAmount(bal)
+                if n and n >= 100 then
+                    cachedCoinsText, cachedCoinsNum = bal, n
+                end
+            end
             if t:match("^%d+$") and obj.Visible then
                 local n = tonumber(t)
                 if n and n >= 0 and n < 100000 then
                     totalRebirths = n
                 end
             end
-        end
-    end
-end
-
-local function findCoinLabel()
-    if coinLabelRef and coinLabelRef.Parent then return coinLabelRef end
-    pcall(function()
-        for _, obj in ipairs(LP.PlayerGui:GetDescendants()) do
-            if obj:IsA("TextLabel") or obj:IsA("TextButton") then
-                local path = obj:GetFullName():lower()
-                local txt = obj.Text or ""
-                if txt:find("%d") and (path:find("pixel") or txt:lower():find("pixel")) and not txt:lower():find("rebirth") then
-                    coinLabelRef = obj
-                    return
-                end
-            end
-        end
-    end)
-    return coinLabelRef
-end
-
-local function updateCoins()
-    local lbl = findCoinLabel()
-    if lbl and lbl.Text ~= "" then
-        local raw = lbl.Text:match("([%d%.]+%s*[KMBTQqi]+)") or lbl.Text:match("([%d%,%.]+)")
-        if raw then
-            cachedCoinsText = raw
-            cachedCoinsNum = parseAmount(raw)
         end
     end
 end
@@ -930,4 +998,4 @@ end)
 afkEnabled = true
 setToggle(AfkPill, AfkKnob, true, ACCENT2)
 startAntiAFK()
-print("[osamahub] gui ready")
+print("[osamahub] coin parser fix")
