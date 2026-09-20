@@ -2,6 +2,7 @@ local Players = game:GetService("Players")
 local VirtualUser = game:GetService("VirtualUser")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 repeat task.wait() until game:IsLoaded()
@@ -9,25 +10,17 @@ repeat task.wait() until Players.LocalPlayer
 local LP = Players.LocalPlayer
 repeat task.wait() until LP:FindFirstChild("PlayerGui")
 
-local function waitPath(root, names, timeout)
-    timeout = timeout or 30
-    local cur = root
-    local t = tick()
-    for _, name in ipairs(names) do
-        local nxt
-        repeat
-            nxt = cur:FindFirstChild(name)
-            if not nxt then task.wait(0.1) end
-        until nxt or tick() - t > timeout
-        if not nxt then return nil end
-        cur = nxt
-    end
-    return cur
-end
+local Currency
+pcall(function()
+    Currency = require(ReplicatedStorage:WaitForChild("Library"):WaitForChild("Client"):WaitForChild("Currency"))
+end)
+local Network
+pcall(function()
+    Network = require(ReplicatedStorage.Library.Client.Network)
+end)
 
-waitPath(ReplicatedStorage, {"Library", "Client", "Network"}, 45)
 repeat task.wait() until LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-task.wait(1.5)
+task.wait(0.8)
 
 local WINTER_CF = CFrame.new(-4170.39307, 1028.96558, -4252.91553)
 local VOID_CF   = CFrame.new(-4249.06836, 2029.65088, -4252.03369)
@@ -35,13 +28,11 @@ local VOID_NEAR = VOID_CF * CFrame.new(0, 0, 10)
 
 local cachedCostText, cachedCostNum = "-", nil
 local cachedCoinsText, cachedCoinsNum = "-", nil
-local coinLabelRef = nil
-local lastCoinScan = 0
+local costFresh = false
 local totalRebirths, sessionRebirths = "-", 0
-
-local Status, CoinLbl, CostLbl, TotalLbl, SessionLbl, EtaLbl, AvgLbl, StatusDot
 local statusText = "Idle"
-
+local etaText, avgText = "-", "-"
+local Status, CoinLbl, CostLbl, TotalLbl, SessionLbl, EtaLbl, AvgLbl, StatusDot
 local sampleCoins, sampleTime = nil, nil
 local coinRate = 0
 local cycleStart = tick()
@@ -65,9 +56,7 @@ local LINE = Color3.fromRGB(36, 40, 50)
 local MUTED = Color3.fromRGB(128, 134, 148)
 local WHITE = Color3.fromRGB(240, 242, 246)
 
-local function setStatus(t)
-    statusText = tostring(t or "")
-end
+local function setStatus(t) statusText = tostring(t or "") end
 
 local function formatTime(sec)
     if not sec or sec ~= sec or sec < 0 then return "-" end
@@ -75,14 +64,32 @@ local function formatTime(sec)
     local h = math.floor(sec / 3600)
     local m = math.floor((sec % 3600) / 60)
     local s = sec % 60
-    if h > 0 then
-        return string.format("%dh %dm", h, m)
-    elseif m > 0 then
-        return string.format("%dm %ds", m, s)
-    else
-        return string.format("%ds", s)
+    if h > 0 then return string.format("%dh %dm", h, m) end
+    if m > 0 then return string.format("%dm %ds", m, s) end
+    return string.format("%ds", s)
+end
+
+local function formatCoins(n)
+    if type(n) ~= "number" or n ~= n then return "-" end
+    local abs = math.abs(n)
+    if abs >= 1e12 then return string.format("%.2fT", n / 1e12) end
+    if abs >= 1e9 then return string.format("%.2fB", n / 1e9) end
+    if abs >= 1e6 then return string.format("%.2fM", n / 1e6) end
+    if abs >= 1e3 then return string.format("%.2fK", n / 1e3) end
+    return tostring(math.floor(n + 0.5))
+end
+
+local function updateCoins()
+    if not Currency or type(Currency.Get) ~= "function" then return end
+    local n = Currency.Get("PixelCoins")
+    if type(n) == "number" then
+        cachedCoinsNum = n
+        cachedCoinsText = formatCoins(n)
     end
 end
+
+pcall(updateCoins)
+print("[osamahub] PixelCoins", cachedCoinsText, cachedCoinsNum)
 
 local function getHRP()
     local char = LP.Character
@@ -131,10 +138,7 @@ local function antiAFK()
 end
 
 local function startAntiAFK()
-    if idledConn then
-        pcall(function() idledConn:Disconnect() end)
-        idledConn = nil
-    end
+    if idledConn then pcall(function() idledConn:Disconnect() end) idledConn = nil end
     pcall(function()
         idledConn = LP.Idled:Connect(function()
             pcall(function()
@@ -143,9 +147,7 @@ local function startAntiAFK()
             end)
         end)
     end)
-    if afkThread then
-        pcall(function() task.cancel(afkThread) end)
-    end
+    if afkThread then pcall(function() task.cancel(afkThread) end) end
     afkThread = task.spawn(function()
         while afkEnabled do
             pcall(antiAFK)
@@ -155,72 +157,45 @@ local function startAntiAFK()
 end
 
 local function stopAntiAFK()
-    if idledConn then
-        pcall(function() idledConn:Disconnect() end)
-        idledConn = nil
-    end
-    if afkThread then
-        pcall(function() task.cancel(afkThread) end)
-        afkThread = nil
-    end
-end
-
-local function getNetwork()
-    local mod = waitPath(ReplicatedStorage, {"Library", "Client", "Network"}, 45)
-    if not mod then return nil end
-    local ok, net = pcall(require, mod)
-    if ok then return net end
-    return nil
-end
-
-local function getRngChannel()
-    local net = getNetwork()
-    if not net or not net.Channel then return nil end
-    local ok, ch = pcall(function() return net.Channel("RNG") end)
-    if ok then return ch end
-    return nil
+    if idledConn then pcall(function() idledConn:Disconnect() end) idledConn = nil end
+    if afkThread then pcall(function() task.cancel(afkThread) end) afkThread = nil end
 end
 
 local function invokeNet(name)
-    local net = getNetwork()
-    if not net then return end
+    if not Network then return end
     local done = false
     task.spawn(function()
-        pcall(function() net.InvokeServer(name) end)
+        pcall(function() Network.InvokeServer(name) end)
         done = true
     end)
     local t = tick()
-    while not done and tick() - t < 6 do
-        task.wait(0.1)
-    end
+    while not done and tick() - t < 6 do task.wait(0.1) end
+end
+
+local function getRngChannel()
+    if not Network or not Network.Channel then return nil end
+    local ok, ch = pcall(function() return Network.Channel("RNG") end)
+    if ok then return ch end
 end
 
 local function rngFire(a, b)
     local ch = getRngChannel()
-    local net = getNetwork()
-    pcall(function()
-        if ch then ch:FireServer(a, b) end
-    end)
-    pcall(function()
-        if net and net.FireServer then net.FireServer("RNG", a, b) end
-    end)
+    pcall(function() if ch then ch:FireServer(a, b) end end)
+    pcall(function() if Network and Network.FireServer then Network.FireServer("RNG", a, b) end end)
 end
 
 local function getBoardContent()
-    return workspace._THINGS.Minigames.ServerOwned.RNGEvent.Interact.Boards.IncrementalBoard.Main.SurfaceGui.Bottom.Content
+    local ok, content = pcall(function()
+        return workspace._THINGS.Minigames.ServerOwned.RNGEvent.Interact.Boards.IncrementalBoard.Main.SurfaceGui.Bottom.Content
+    end)
+    if ok then return content end
 end
 
 local function waitBoard(timeout)
     local t = tick()
     while tick() - t < (timeout or 8) do
-        local ok = false
-        pcall(function()
-            local c = getBoardContent()
-            if c and c:FindFirstChild("BreakablesIncremental") then
-                ok = true
-            end
-        end)
-        if ok then return true end
+        local c = getBoardContent()
+        if c and c:FindFirstChild("BreakablesIncremental") then return true end
         task.wait(0.2)
     end
     return false
@@ -244,9 +219,7 @@ local function fireBtn(btn)
 end
 
 local function getMainGui()
-    local ok, guiMod = pcall(function()
-        return require(ReplicatedStorage.Library.Client.GUI)
-    end)
+    local ok, guiMod = pcall(function() return require(ReplicatedStorage.Library.Client.GUI) end)
     if ok and guiMod and guiMod.Main then
         local ok2, main = pcall(function() return guiMod.Main() end)
         if ok2 then return main end
@@ -268,10 +241,7 @@ local function pressAutoBtn()
     end)
 end
 
-local function stopAutoRoll()
-    rngFire("SetAutoRolling", false)
-end
-
+local function stopAutoRoll() rngFire("SetAutoRolling", false) end
 local function enableAutoRoll()
     if not autoRollOn then return end
     rngFire("SetAutoRolling", true)
@@ -292,99 +262,12 @@ local function parseAmount(str)
     return num
 end
 
-local function extractBalance(text)
-    if type(text) ~= "string" or text == "" then return nil, nil end
-    local low = text:lower()
-    if low:find("1%s*in") or low:find("in%s*%d") then return nil, nil end
-    if low:find("rebirth") or low:find("luck") or low:find("stock") then return nil, nil end
-    if text:match("^%+") or text:match("^%-") then return nil, nil end
-    if low:find("/") then return nil, nil end
-    local raw = text:match("([%d%.]+%s*[KMBTQqi]+)")
-    if raw then
-        local n = parseAmount(raw)
-        if n and n >= 100 then
-            return raw:gsub("%s+", ""), n
-        end
-    end
-    raw = text:match("([%d,][%d,%.]*)")
-    if raw then
-        local n = parseAmount(raw)
-        if n and n >= 1000 then
-            return raw, n
-        end
-    end
-    return nil, nil
-end
-
-local function coinLooksWrong(n)
-    if not n then return true end
-    if n < 10 then return true end
-    if cachedCostNum and cachedCostNum >= 1e5 and n < 100 then return true end
-    return false
-end
-
-local function scanCoinLabel(force)
-    if not force and coinLabelRef and coinLabelRef.Parent and tick() - lastCoinScan < 6 then
-        local raw, n = extractBalance(coinLabelRef.Text)
-        if n and not coinLooksWrong(n) then
-            cachedCoinsText, cachedCoinsNum = raw, n
-            return
-        end
-        coinLabelRef = nil
-    end
-    lastCoinScan = tick()
-    local best, bestScore, bestRaw, bestNum = nil, -1, nil, nil
-    pcall(function()
-        for _, gui in ipairs(LP.PlayerGui:GetChildren()) do
-            if gui:IsA("ScreenGui") and gui.Name ~= "OsamaHub" then
-                for _, obj in ipairs(gui:GetDescendants()) do
-                    if obj:IsA("TextLabel") or obj:IsA("TextButton") then
-                        local txt = obj.Text or ""
-                        local raw, n = extractBalance(txt)
-                        if n then
-                            local path = obj:GetFullName():lower()
-                            if not path:find("osamahub") and not path:find("billboard") then
-                                local score = 0
-                                if path:find("pixel") then score += 8 end
-                                if path:find("coin") then score += 8 end
-                                if path:find("currency") or path:find("balance") then score += 6 end
-                                if path:find("main") then score += 2 end
-                                if txt:lower():find("pixel") then score += 3 end
-                                if txt:find("[KMBTQqi]") then score += 5 end
-                                if n >= 1e6 then score += 4 elseif n >= 1e3 then score += 2 end
-                                if score > bestScore then
-                                    best, bestScore, bestRaw, bestNum = obj, score, raw, n
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end)
-    if best and bestNum then
-        coinLabelRef = best
-        cachedCoinsText, cachedCoinsNum = bestRaw, bestNum
-    end
-end
-
-local function updateCoins()
-    if coinLabelRef and coinLabelRef.Parent then
-        local raw, n = extractBalance(coinLabelRef.Text)
-        if n and not coinLooksWrong(n) then
-            cachedCoinsText, cachedCoinsNum = raw, n
-            return
-        end
-        coinLabelRef = nil
-    end
-    scanCoinLabel(true)
-end
-
 local function getUpgradeLevel(name)
     local cur, maxLvl = 0, 1
     pcall(function()
-        local lbl = getBoardContent()[name].Main.Lvl
-        local a, b = lbl.Text:match("(%d+)/(%d+)")
+        local content = getBoardContent()
+        if not content then return end
+        local a, b = content[name].Main.Lvl.Text:match("(%d+)/(%d+)")
         cur = tonumber(a) or 0
         maxLvl = tonumber(b) or 1
     end)
@@ -394,8 +277,7 @@ end
 local function allUpgradesMaxed()
     for _, name in ipairs({"BreakablesIncremental","PixelCoinsMultiplier","LuckMultiplier"}) do
         local cur, maxLvl = getUpgradeLevel(name)
-        if maxLvl <= 1 then return false end
-        if cur < maxLvl then return false end
+        if maxLvl <= 1 or cur < maxLvl then return false end
     end
     return true
 end
@@ -408,8 +290,7 @@ local function upgradesReset()
 end
 
 local function buyOne(name)
-    local content
-    pcall(function() content = getBoardContent() end)
+    local content = getBoardContent()
     if not content then return end
     local frame = content:FindFirstChild(name)
     if not frame then return end
@@ -434,34 +315,30 @@ local function buyAllOnce()
     if l < lm then buyOne("LuckMultiplier") end
 end
 
-local function updateRebirthCost()
+local function rebirthGuiOpen()
     local gui = LP.PlayerGui:FindFirstChild("RNGRebirth")
+    if not gui or gui.Enabled == false then return nil end
+    return gui
+end
+
+local function updateRebirthCost()
+    local gui = rebirthGuiOpen()
     if not gui then return end
     for _, obj in ipairs(gui:GetDescendants()) do
         if obj:IsA("TextLabel") or obj:IsA("TextButton") then
             local t = obj.Text or ""
             local raw = t:match("Rebirth!%s*%((.-)%)")
-                or t:match("%+%s*([%d%.]+%s*[KMBTQqi]+)%s*Pixel")
-                or t:match("%(([%d%.]+%s*[KMBTQqi]+)%)")
             if raw then
                 local num = parseAmount(raw)
                 if num then
                     cachedCostText = raw
                     cachedCostNum = num
-                end
-            end
-            local bal = t:match("([%d%.]+%s*[KMBTQqi]+)%s*Pixel")
-            if bal and not t:match("^%+") then
-                local n = parseAmount(bal)
-                if n and n >= 100 then
-                    cachedCoinsText, cachedCoinsNum = bal, n
+                    costFresh = true
                 end
             end
             if t:match("^%d+$") and obj.Visible then
                 local n = tonumber(t)
-                if n and n >= 0 and n < 100000 then
-                    totalRebirths = n
-                end
+                if n and n >= 0 and n < 100000 then totalRebirths = n end
             end
         end
     end
@@ -479,62 +356,55 @@ local function updateRate()
                 coinRate = (coinRate == 0) and instant or (coinRate * 0.7 + instant * 0.3)
             end
         end
-        sampleCoins = cachedCoinsNum
-        sampleTime = now
+        sampleCoins, sampleTime = cachedCoinsNum, now
     elseif not sampleCoins then
-        sampleCoins = cachedCoinsNum
-        sampleTime = now
+        sampleCoins, sampleTime = cachedCoinsNum, now
     end
 end
 
-local function getEtaText()
-    if cachedCostNum and cachedCoinsNum and cachedCoinsNum >= cachedCostNum then
-        return "Ready"
+local function refreshEtaAvg()
+    local maxed = false
+    pcall(function() maxed = allUpgradesMaxed() end)
+    if not maxed or not costFresh or not cachedCostNum or not cachedCoinsNum then
+        etaText = "-"
+    elseif cachedCoinsNum >= cachedCostNum then
+        etaText = "Ready"
+    elseif coinRate > 0 then
+        etaText = formatTime((cachedCostNum - cachedCoinsNum) / coinRate)
+    else
+        etaText = "-"
     end
-    if not cachedCostNum or not cachedCoinsNum or coinRate <= 0 then
-        return "-"
-    end
-    local left = cachedCostNum - cachedCoinsNum
-    if left <= 0 then return "Ready" end
-    return formatTime(left / coinRate)
-end
-
-local function getAvgText()
     if sessionRebirths <= 0 then
-        return formatTime(tick() - cycleStart)
+        avgText = formatTime(tick() - cycleStart)
+    else
+        avgText = formatTime(totalCycleTime / sessionRebirths)
     end
-    return formatTime(totalCycleTime / sessionRebirths)
 end
 
 local function canAfford()
     updateCoins()
-    return cachedCostNum ~= nil and cachedCoinsNum ~= nil and cachedCoinsNum >= cachedCostNum
+    return costFresh and cachedCostNum ~= nil and cachedCoinsNum ~= nil and cachedCoinsNum >= cachedCostNum
 end
 
 local function waitRebirthGui(timeout)
     local t = tick()
     while tick() - t < (timeout or 8) do
-        local gui = LP.PlayerGui:FindFirstChild("RNGRebirth")
-        if gui then
-            updateRebirthCost()
-            return gui
-        end
+        local gui = rebirthGuiOpen()
+        if gui then updateRebirthCost() return gui end
         task.wait(0.15)
     end
-    return LP.PlayerGui:FindFirstChild("RNGRebirth")
+    return rebirthGuiOpen()
 end
 
 local function pressRebirth(gui)
-    gui = gui or LP.PlayerGui:FindFirstChild("RNGRebirth")
+    gui = gui or rebirthGuiOpen()
     if not gui then return end
     pcall(function() fireBtn(gui.Frame.Content.Rebirth.Button) end)
     for _, obj in ipairs(gui:GetDescendants()) do
         if obj:IsA("ImageButton") or obj:IsA("TextButton") or obj:IsA("GuiButton") then
             local title = obj:FindFirstChild("Title", true)
             local txt = string.lower(((title and title.Text) or obj.Text or obj.Name or ""))
-            if txt:find("rebirth") then
-                fireBtn(obj)
-            end
+            if txt:find("rebirth") then fireBtn(obj) end
         elseif obj:IsA("TextLabel") then
             local txt = string.lower(obj.Text or "")
             if txt:find("rebirth!") and obj.Parent and obj.Parent:IsA("GuiButton") then
@@ -574,8 +444,8 @@ local function onRebirthSuccess()
     sessionRebirths += 1
     if typeof(totalRebirths) == "number" then totalRebirths += 1 end
     cachedCostText, cachedCostNum = "-", nil
+    costFresh = false
     sampleCoins, sampleTime, coinRate = nil, nil, 0
-    coinLabelRef = nil
     task.wait(1.2)
     if autoRollOn then enableAutoRoll() end
 end
@@ -599,7 +469,7 @@ local function visitVoid()
     local beforeCoins = cachedCoinsNum
     setStatus("Attempting rebirth")
     for _ = 1, 4 do
-        pressRebirth(LP.PlayerGui:FindFirstChild("RNGRebirth") or gui)
+        pressRebirth(rebirthGuiOpen() or gui)
         local t = tick()
         while tick() - t < 2.5 do
             if upgradesReset() then
@@ -638,12 +508,8 @@ local function farmWinter()
             end
             buyAllOnce()
         else
-            if canAfford() then
-                return "need_void"
-            end
-            if cachedCostNum == nil and tick() - started > 8 then
-                return "need_void"
-            end
+            if canAfford() then return "need_void" end
+            if not costFresh and tick() - started > 12 then return "need_void" end
             setStatus("Maxed  •  farming " .. tostring(cachedCostText))
         end
         task.wait(0.4)
@@ -662,9 +528,7 @@ local function doFullCycle()
     if autoRollOn then enableAutoRoll() end
     while running do
         local result = farmWinter()
-        if result == "stop" or not running then
-            return
-        end
+        if result == "stop" or not running then return end
         if result == "need_void" then
             local r = visitVoid()
             if r == "success" then
@@ -676,33 +540,31 @@ local function doFullCycle()
     end
 end
 
-local function getUiParent()
-    local ok, hui = pcall(function() return gethui() end)
-    if ok and hui then return hui end
-    local ok2, cg = pcall(function() return game:GetService("CoreGui") end)
-    if ok2 and cg then return cg end
-    return LP:WaitForChild("PlayerGui")
+local function getHost()
+    local pg = LP.PlayerGui
+    local main = pg:FindFirstChild("Main")
+    if main then return main end
+    for _, g in ipairs(pg:GetChildren()) do
+        if g:IsA("LayerCollector") then return g end
+    end
+    return pg
 end
 
-local uiParent = getUiParent()
+local host = getHost()
 pcall(function()
-    local old = uiParent:FindFirstChild("OsamaHub")
-    if old then old:Destroy() end
-end)
-pcall(function()
-    local old = game.CoreGui:FindFirstChild("OsamaHub")
+    local old = host:FindFirstChild("OsamaHub")
     if old then old:Destroy() end
 end)
 pcall(function()
     local old = LP.PlayerGui:FindFirstChild("OsamaHub")
     if old then old:Destroy() end
 end)
+print("[osamahub] gui host", host:GetFullName())
 
 local function corner(p, r)
     local c = Instance.new("UICorner")
     c.CornerRadius = UDim.new(0, r or 8)
     c.Parent = p
-    return c
 end
 
 local function stroke(p, col, tr)
@@ -711,7 +573,6 @@ local function stroke(p, col, tr)
     s.Transparency = tr or 0.4
     s.Thickness = 1
     s.Parent = p
-    return s
 end
 
 local function txt(parent, props)
@@ -726,29 +587,22 @@ local function txt(parent, props)
     return x
 end
 
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "OsamaHub"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.IgnoreGuiInset = true
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-ScreenGui.DisplayOrder = 999
-ScreenGui.Parent = uiParent
-
-local Main = Instance.new("Frame")
-Main.Name = "Main"
-Main.Size = UDim2.new(0, 252, 0, 392)
-Main.Position = UDim2.new(0, 16, 0.28, 0)
-Main.BackgroundColor3 = BG
-Main.BorderSizePixel = 0
-Main.Parent = ScreenGui
-corner(Main, 14)
-stroke(Main, Color3.fromRGB(48, 52, 64), 0.35)
+local Panel = Instance.new("Frame")
+Panel.Name = "OsamaHub"
+Panel.Size = UDim2.new(0, 252, 0, 392)
+Panel.Position = UDim2.new(0, 16, 0.28, 0)
+Panel.BackgroundColor3 = BG
+Panel.BorderSizePixel = 0
+Panel.ZIndex = 50
+Panel.Parent = host
+corner(Panel, 14)
+stroke(Panel, Color3.fromRGB(48, 52, 64), 0.35)
 
 local header = Instance.new("Frame")
 header.Size = UDim2.new(1, -20, 0, 40)
 header.Position = UDim2.new(0, 10, 0, 10)
 header.BackgroundTransparency = 1
-header.Parent = Main
+header.Parent = Panel
 
 local badge = Instance.new("Frame")
 badge.Size = UDim2.new(0, 26, 0, 26)
@@ -758,32 +612,9 @@ badge.BorderSizePixel = 0
 badge.Parent = header
 corner(badge, 7)
 stroke(badge, GOLD, 0.45)
-
-txt(badge, {
-    Size = UDim2.new(1, 0, 1, 0),
-    Text = "O",
-    Font = Enum.Font.GothamBold,
-    TextSize = 13,
-    TextColor3 = GOLD,
-    TextXAlignment = Enum.TextXAlignment.Center,
-})
-
-txt(header, {
-    Size = UDim2.new(1, -50, 0, 16),
-    Position = UDim2.new(0, 36, 0, 4),
-    Text = "OSAMA HUB",
-    Font = Enum.Font.GothamBold,
-    TextSize = 14,
-})
-
-txt(header, {
-    Size = UDim2.new(1, -50, 0, 14),
-    Position = UDim2.new(0, 36, 0, 20),
-    Text = "RNG  •  Clicker Simulator",
-    Font = Enum.Font.Gotham,
-    TextSize = 10,
-    TextColor3 = MUTED,
-})
+txt(badge, {Size = UDim2.new(1, 0, 1, 0), Text = "O", Font = Enum.Font.GothamBold, TextSize = 13, TextColor3 = GOLD, TextXAlignment = Enum.TextXAlignment.Center})
+txt(header, {Size = UDim2.new(1, -50, 0, 16), Position = UDim2.new(0, 36, 0, 4), Text = "OSAMA HUB", Font = Enum.Font.GothamBold, TextSize = 14})
+txt(header, {Size = UDim2.new(1, -50, 0, 14), Position = UDim2.new(0, 36, 0, 20), Text = "RNG  •  Clicker Simulator", Font = Enum.Font.Gotham, TextSize = 10, TextColor3 = MUTED})
 
 StatusDot = Instance.new("Frame")
 StatusDot.Size = UDim2.new(0, 7, 0, 7)
@@ -798,7 +629,7 @@ line.Size = UDim2.new(1, -20, 0, 1)
 line.Position = UDim2.new(0, 10, 0, 54)
 line.BackgroundColor3 = LINE
 line.BorderSizePixel = 0
-line.Parent = Main
+line.Parent = Panel
 
 local function makeToggle(text, sub, y)
     local btn = Instance.new("TextButton")
@@ -807,25 +638,10 @@ local function makeToggle(text, sub, y)
     btn.BackgroundColor3 = ROW
     btn.AutoButtonColor = false
     btn.Text = ""
-    btn.Parent = Main
+    btn.Parent = Panel
     corner(btn, 10)
-
-    txt(btn, {
-        Size = UDim2.new(1, -56, 0, 15),
-        Position = UDim2.new(0, 12, 0, 5),
-        Text = text,
-        Font = Enum.Font.GothamBold,
-        TextSize = 12,
-    })
-    txt(btn, {
-        Size = UDim2.new(1, -56, 0, 13),
-        Position = UDim2.new(0, 12, 0, 21),
-        Text = sub,
-        Font = Enum.Font.Gotham,
-        TextSize = 10,
-        TextColor3 = MUTED,
-    })
-
+    txt(btn, {Size = UDim2.new(1, -56, 0, 15), Position = UDim2.new(0, 12, 0, 5), Text = text, Font = Enum.Font.GothamBold, TextSize = 12})
+    txt(btn, {Size = UDim2.new(1, -56, 0, 13), Position = UDim2.new(0, 12, 0, 21), Text = sub, Font = Enum.Font.Gotham, TextSize = 10, TextColor3 = MUTED})
     local pill = Instance.new("Frame")
     pill.Name = "Pill"
     pill.Size = UDim2.new(0, 32, 0, 18)
@@ -833,7 +649,6 @@ local function makeToggle(text, sub, y)
     pill.BackgroundColor3 = Color3.fromRGB(34, 38, 48)
     pill.Parent = btn
     corner(pill, 9)
-
     local knob = Instance.new("Frame")
     knob.Name = "Knob"
     knob.Size = UDim2.new(0, 14, 0, 14)
@@ -864,7 +679,7 @@ local stats = Instance.new("Frame")
 stats.Size = UDim2.new(1, -20, 0, 168)
 stats.Position = UDim2.new(0, 10, 0, 200)
 stats.BackgroundColor3 = CARD
-stats.Parent = Main
+stats.Parent = Panel
 corner(stats, 12)
 
 Status = txt(stats, {
@@ -884,22 +699,8 @@ sep.BorderSizePixel = 0
 sep.Parent = stats
 
 local function row(y, key)
-    txt(stats, {
-        Size = UDim2.new(0.5, 0, 0, 16),
-        Position = UDim2.new(0, 10, 0, y),
-        Text = key,
-        Font = Enum.Font.Gotham,
-        TextSize = 11,
-        TextColor3 = MUTED,
-    })
-    return txt(stats, {
-        Size = UDim2.new(0.46, 0, 0, 16),
-        Position = UDim2.new(0.50, 0, 0, y),
-        Text = "-",
-        Font = Enum.Font.GothamBold,
-        TextSize = 11,
-        TextXAlignment = Enum.TextXAlignment.Right,
-    })
+    txt(stats, {Size = UDim2.new(0.5, 0, 0, 16), Position = UDim2.new(0, 10, 0, y), Text = key, Font = Enum.Font.Gotham, TextSize = 11, TextColor3 = MUTED})
+    return txt(stats, {Size = UDim2.new(0.46, 0, 0, 16), Position = UDim2.new(0.50, 0, 0, y), Text = "-", Font = Enum.Font.GothamBold, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Right})
 end
 
 CoinLbl = row(36, "PIXEL COINS")
@@ -909,7 +710,7 @@ AvgLbl = row(96, "AVG CYCLE")
 TotalLbl = row(116, "TOTAL")
 SessionLbl = row(136, "SESSION")
 
-txt(Main, {
+txt(Panel, {
     Size = UDim2.new(1, 0, 0, 12),
     Position = UDim2.new(0, 0, 1, -18),
     Text = "Right Shift  •  osamahub",
@@ -924,7 +725,7 @@ local tw = TweenInfo.new(0.32, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 local function toggleGui()
     open = not open
     pcall(function()
-        TweenService:Create(Main, tw, {
+        TweenService:Create(Panel, tw, {
             Position = open and UDim2.new(0, 16, 0.28, 0) or UDim2.new(0, -270, 0.28, 0)
         }):Play()
     end)
@@ -935,26 +736,26 @@ UserInputService.InputBegan:Connect(function(input, gp)
     if input.KeyCode == Enum.KeyCode.RightShift then toggleGui() end
 end)
 
-task.spawn(function()
-    while ScreenGui.Parent do
-        pcall(function()
-            updateCoins()
-            updateRebirthCost()
-            updateRate()
-            if Status then Status.Text = statusText end
-            if CoinLbl then CoinLbl.Text = tostring(cachedCoinsText) end
-            if CostLbl then CostLbl.Text = tostring(cachedCostText) end
-            if EtaLbl then EtaLbl.Text = getEtaText() end
-            if AvgLbl then AvgLbl.Text = getAvgText() end
-            if TotalLbl then TotalLbl.Text = tostring(totalRebirths) end
-            if SessionLbl then SessionLbl.Text = tostring(sessionRebirths) end
-        end)
-        task.wait(0.4)
-    end
+local lastUi = 0
+RunService.Heartbeat:Connect(function()
+    if tick() - lastUi < 0.25 then return end
+    lastUi = tick()
+    pcall(updateCoins)
+    pcall(updateRebirthCost)
+    pcall(updateRate)
+    pcall(refreshEtaAvg)
+    pcall(function()
+        if Status then Status.Text = statusText end
+        if CoinLbl then CoinLbl.Text = tostring(cachedCoinsText) end
+        if CostLbl then CostLbl.Text = tostring(cachedCostText) end
+        if EtaLbl then EtaLbl.Text = etaText end
+        if AvgLbl then AvgLbl.Text = avgText end
+        if TotalLbl then TotalLbl.Text = tostring(totalRebirths) end
+        if SessionLbl then SessionLbl.Text = tostring(sessionRebirths) end
+    end)
 end)
 
 local cycleThread
-
 CycleBtn.MouseButton1Click:Connect(function()
     running = not running
     setToggle(CyclePill, CycleKnob, running, ACCENT)
@@ -965,8 +766,19 @@ CycleBtn.MouseButton1Click:Connect(function()
         cycleStart = tick()
         lastRebirthAt = tick()
         eventEntered = false
+        setStatus("Starting")
         cycleThread = task.spawn(function()
-            pcall(doFullCycle)
+            while running do
+                local ok, err = pcall(doFullCycle)
+                if not running then break end
+                if not ok then
+                    setStatus("Retry")
+                    print("[osamahub] cycle", err)
+                    task.wait(2)
+                else
+                    task.wait(1)
+                end
+            end
             setStatus("Stopped")
         end)
     else
@@ -978,24 +790,16 @@ end)
 RollBtn.MouseButton1Click:Connect(function()
     autoRollOn = not autoRollOn
     setToggle(RollPill, RollKnob, autoRollOn, ACCENT3)
-    if autoRollOn then
-        enableAutoRoll()
-    else
-        stopAutoRoll()
-    end
+    if autoRollOn then enableAutoRoll() else stopAutoRoll() end
 end)
 
 AfkBtn.MouseButton1Click:Connect(function()
     afkEnabled = not afkEnabled
     setToggle(AfkPill, AfkKnob, afkEnabled, ACCENT2)
-    if afkEnabled then
-        startAntiAFK()
-    else
-        stopAntiAFK()
-    end
+    if afkEnabled then startAntiAFK() else stopAntiAFK() end
 end)
 
 afkEnabled = true
 setToggle(AfkPill, AfkKnob, true, ACCENT2)
 startAntiAFK()
-print("[osamahub] coin parser fix")
+print("[osamahub] ready")
