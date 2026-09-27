@@ -57,22 +57,18 @@ local merchantKind = "DicesMerchant"
 local afkThread
 local eventEntered = false
 local running = false
-local raidOn = false
-local raidBusy = false
-local raidThread = nil
-local hatchAfterRaid = true
-local sessionRaids = 0
-local sessionEggs = 0
-local raidFarmAcc = 0
-local raidFarmOnAt = 0
-local cachedRaidPoints = 0
-local cachedRaidLvl = 0
-local raidStatusText = "Raid idle"
-local remotes = ReplicatedStorage:FindFirstChild("Remotes") or ReplicatedStorage:WaitForChild("Remotes")
-local Init = remotes:FindFirstChild("Init")
-local RaidLvlLbl, RaidPtsLbl, RaidCountLbl, RaidEggLbl, RaidTimeLbl, RaidStatusLbl
-local RaidBtn, RaidPill, RaidKnob, HatchBtn, HatchPill, HatchKnob
-local RaidCard
+local Raid = {
+    on = false,
+    busy = false,
+    hatch = true,
+    raids = 0,
+    eggs = 0,
+    acc = 0,
+    onAt = 0,
+    points = 0,
+    lvl = 0,
+    status = "Raid idle",
+}
 
 local GOLD = Color3.fromRGB(232, 195, 106)
 local ACCENT = Color3.fromRGB(80, 220, 140)
@@ -1612,517 +1608,606 @@ local function doFullCycle()
     end
 end
 
-local function raidSay(t)
-    raidStatusText = tostring(t or "")
-    print("[raid]", raidStatusText)
-end
 
-local function raidFmtNum(n)
-    n = math.floor(tonumber(n) or 0)
-    local s = tostring(n)
-    local k
-    while true do
-        s, k = string.gsub(s, "^(-?%d+)(%d%d%d)", "%1,%2")
-        if k == 0 then
-            break
-        end
+local function bootRaid()
+    local remotes = ReplicatedStorage:FindFirstChild("Remotes") or ReplicatedStorage:WaitForChild("Remotes")
+    local Init = remotes and remotes:FindFirstChild("Init")
+
+    local function raidSay(t)
+        Raid.status = tostring(t or "")
+        print("[raid]", Raid.status)
     end
-    return s
-end
 
-local function raidFarmSec()
-    local t = raidFarmAcc
-    if raidFarmOnAt > 0 then
-        t = t + (os.clock() - raidFarmOnAt)
-    end
-    return t
-end
-
-local function raidFmtTime(sec)
-    sec = math.floor(sec or 0)
-    local h = math.floor(sec / 3600)
-    local m = math.floor((sec % 3600) / 60)
-    local s = sec % 60
-    if h > 0 then
-        return string.format("%d:%02d:%02d", h, m, s)
-    end
-    return string.format("%d:%02d", m, s)
-end
-
-local function grabRaidStats()
-    pcall(function()
-        if Currency and Currency.Get then
-            local v = Currency.Get("RaidPoints")
-            if type(v) == "number" then
-                cachedRaidPoints = v
+    local function raidFmtNum(n)
+        n = math.floor(tonumber(n) or 0)
+        local s = tostring(n)
+        local k
+        while true do
+            s, k = string.gsub(s, "^(-?%d+)(%d%d%d)", "%1,%2")
+            if k == 0 then
+                break
             end
         end
-    end)
-    pcall(function()
-        local lab = LP.PlayerGui.RaidLvlDmg.Container.Progress.Lvl
-        local n = tonumber(string.match(lab.Text or "", "%d+"))
-        if n then
-            cachedRaidLvl = n
+        return s
+    end
+
+    local function raidFarmSec()
+        local t = Raid.acc
+        if Raid.onAt > 0 then
+            t = t + (os.clock() - Raid.onAt)
         end
-    end)
-end
+        return t
+    end
 
-local function raidDiffFromLvl(lvl)
-    lvl = tonumber(lvl) or 0
-    if lvl >= 2500 then
-        return 5
-    end
-    if lvl >= 1200 then
-        return 4
-    end
-    if lvl >= 500 then
-        return 3
-    end
-    if lvl >= 100 then
-        return 2
-    end
-    return 1
-end
-
-local function raidInvoke(ev, a, b, c)
-    if not ev then
-        return nil
-    end
-    local res
-    local ok = pcall(function()
-        if c ~= nil then
-            res = ev:InvokeServer(a, b, c)
-        elseif b ~= nil then
-            res = ev:InvokeServer(a, b)
-        elseif a ~= nil then
-            res = ev:InvokeServer(a)
-        else
-            res = ev:InvokeServer()
+    local function raidFmtTime(sec)
+        sec = math.floor(sec or 0)
+        local h = math.floor(sec / 3600)
+        local m = math.floor((sec % 3600) / 60)
+        local s = sec % 60
+        if h > 0 then
+            return string.format("%d:%02d:%02d", h, m, s)
         end
-    end)
-    if not ok then
-        return nil
+        return string.format("%d:%02d", m, s)
     end
-    return res
-end
 
-local function findRaidCluster()
-    local list = remotes:GetChildren()
-    local slotsI, slotsEv
-    for i = 130, math.min(180, #list) do
-        local ev = list[i]
-        if ev and ev:IsA("RemoteFunction") then
-            local res
-            local ok = pcall(function()
-                res = ev:InvokeServer()
-            end)
-            if ok and type(res) == "table" then
-                for _, info in pairs(res) do
-                    if type(info) == "table" and info.Slot ~= nil and info.Difficulty ~= nil then
-                        slotsI, slotsEv = i, ev
-                        break
-                    end
+    local function grabRaidStats()
+        pcall(function()
+            if Currency and Currency.Get then
+                local v = Currency.Get("RaidPoints")
+                if type(v) == "number" then
+                    Raid.points = v
                 end
-            end
-        end
-        if slotsEv then
-            break
-        end
-    end
-    if not slotsI then
-        slotsI = 146
-        slotsEv = list[146]
-    end
-    local function at(off)
-        return list[slotsI + off]
-    end
-    return {
-        slots = slotsEv,
-        claim = at(1),
-        cfg = at(2),
-        start = at(4),
-        unclaim = at(3),
-        hit = at(15),
-        lobbyRF = at(16),
-        leave = at(17),
-        lobbyRE = at(18),
-    }
-end
-
-local function raidPetGuids()
-    local out = {}
-    pcall(function()
-        local Pet = require(ReplicatedStorage.Library.Client.Pet)
-        for _, data in pairs(Pet.Pets) do
-            if type(data) == "table" and type(data.GUID) == "string" and #data.GUID == 16 then
-                table.insert(out, data.GUID)
-            end
-        end
-    end)
-    return out
-end
-
-local function raidSlotState(R)
-    local mine, empty
-    pcall(function()
-        local all = R.slots:InvokeServer()
-        if type(all) ~= "table" then
-            return
-        end
-        for _, info in pairs(all) do
-            if type(info) == "table" then
-                if info.OwnerName == LP.Name or info.OwnerId == LP.UserId then
-                    mine = info.Slot
-                elseif not empty and info.Started ~= true and (info.OwnerName == nil or info.OwnerName == "") then
-                    empty = info.Slot
-                end
-            end
-        end
-    end)
-    return mine, empty
-end
-
-local function raidGroundY(pos)
-    local origin = pos + Vector3.new(0, 30, 0)
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    if LP.Character then
-        params.FilterDescendantsInstances = {LP.Character}
-    end
-    local hit = workspace:Raycast(origin, Vector3.new(0, -90, 0), params)
-    if hit then
-        return hit.Position.Y + 3.2
-    end
-    return pos.Y
-end
-
-local function raidSmoothTo(pos, lookAt)
-    local hrp = getHRP()
-    if not hrp then
-        return
-    end
-    local y = raidGroundY(pos)
-    local dest = Vector3.new(pos.X, y, pos.Z)
-    local look = lookAt or dest
-    local goal = CFrame.new(dest, Vector3.new(look.X, y, look.Z))
-    local startCf = hrp.CFrame
-    for i = 1, 4 do
-        if hrp.Parent then
-            hrp.CFrame = startCf:Lerp(goal, i / 4)
-        end
-        task.wait(0.01)
-    end
-    if hrp.Parent then
-        hrp.CFrame = goal
-    end
-end
-
-local function raidRoomGates()
-    local out = {}
-    local rooms
-    pcall(function()
-        rooms = workspace._THINGS.Minigames.RaidLobby.Rooms
-    end)
-    if not rooms then
-        return out
-    end
-    for i = 1, 6 do
-        local room = rooms:FindFirstChild(tostring(i))
-        if room then
-            local gate = room:FindFirstChild("Gate")
-            local hit = gate and gate:FindFirstChild("Hitbox")
-            if hit then
-                table.insert(out, {n = i, part = hit, room = room})
-            end
-        end
-    end
-    return out
-end
-
-local function raidPushPath(R, pets)
-    local gates = raidRoomGates()
-    if #gates == 0 then
-        raidSay("No Rooms.Gate")
-        return
-    end
-    for i = 1, #gates do
-        if not raidOn then
-            break
-        end
-        local g = gates[i]
-        raidSay("Gate " .. tostring(g.n) .. " / 6")
-        local part = g.part
-        local hrp = getHRP()
-        if not hrp then
-            break
-        end
-        local flat = Vector3.new(part.Position.X - hrp.Position.X, 0, part.Position.Z - hrp.Position.Z)
-        if flat.Magnitude < 0.05 then
-            flat = Vector3.new(0, 0, -1)
-        else
-            flat = flat.Unit
-        end
-        raidSmoothTo(part.Position - flat * 5, part.Position)
-
-        local function hpNow()
-            local bh = g.room:FindFirstChild("BreakableHealth")
-            if not bh then
-                return nil
-            end
-            local lab = bh:FindFirstChild("Label", true)
-            if not (lab and lab:IsA("TextLabel")) then
-                return nil
-            end
-            local cur = string.match(lab.Text or "", "([%d%.]+)%s*/")
-            return tonumber(cur)
-        end
-
-        local hitting = true
-        task.spawn(function()
-            while hitting and raidOn do
-                for p = 1, #pets do
-                    if not hitting then
-                        break
-                    end
-                    task.spawn(function()
-                        raidInvoke(R.hit, tostring(g.n), pets[p])
-                    end)
-                end
-                task.wait(0.08)
             end
         end)
+        pcall(function()
+            local lab = LP.PlayerGui.RaidLvlDmg.Container.Progress.Lvl
+            local n = tonumber(string.match(lab.Text or "", "%d+"))
+            if n then
+                Raid.lvl = n
+            end
+        end)
+    end
 
-        local t0 = os.clock()
-        local seenHp
-        local damaged = false
-        while raidOn do
-            local hp = hpNow()
-            if hp then
-                seenHp = seenHp or hp
-                if hp < seenHp then
-                    damaged = true
+    local function raidDiffFromLvl(lvl)
+        lvl = tonumber(lvl) or 0
+        -- 1: 0-99  2: 100-499  3: 500-1199  4: 1200-2499  5: 2500+
+        if lvl >= 2500 then
+            return 5
+        end
+        if lvl >= 1200 then
+            return 4
+        end
+        if lvl >= 500 then
+            return 3
+        end
+        if lvl >= 100 then
+            return 2
+        end
+        return 1
+    end
+
+    local function raidInvoke(ev, a, b, c)
+        if not ev then
+            return nil
+        end
+        local res
+        local ok = pcall(function()
+            if c ~= nil then
+                res = ev:InvokeServer(a, b, c)
+            elseif b ~= nil then
+                res = ev:InvokeServer(a, b)
+            elseif a ~= nil then
+                res = ev:InvokeServer(a)
+            else
+                res = ev:InvokeServer()
+            end
+        end)
+        if not ok then
+            return nil
+        end
+        return res
+    end
+
+    local function findRaidCluster()
+        local list = remotes:GetChildren()
+        local slotsI, slotsEv
+        for i = 130, math.min(180, #list) do
+            local ev = list[i]
+            if ev and ev:IsA("RemoteFunction") then
+                local res
+                local ok = pcall(function()
+                    res = ev:InvokeServer()
+                end)
+                if ok and type(res) == "table" then
+                    for _, info in pairs(res) do
+                        if type(info) == "table" and info.Slot ~= nil and info.Difficulty ~= nil then
+                            slotsI, slotsEv = i, ev
+                            break
+                        end
+                    end
                 end
             end
-            if hp == 0 then
+            if slotsEv then
                 break
             end
-            if damaged and hp == nil then
-                break
-            end
-            if os.clock() - t0 > 15 then
-                break
-            end
-            task.wait(0.04)
         end
-        hitting = false
+        if not slotsI then
+            slotsI = 146
+            slotsEv = list[146]
+        end
+        local function at(off)
+            return list[slotsI + off]
+        end
+        return {
+            slots = slotsEv,
+            claim = at(1),
+            cfg = at(2),
+            start = at(4),
+            unclaim = at(3),
+            hit = at(15),
+            lobbyRF = at(16),
+            leave = at(17),
+            lobbyRE = at(18),
+        }
     end
-end
 
-local function findEmperor()
-    local best
-    pcall(function()
-        best = workspace._THINGS.Minigames.RaidEvent.Map.Scenery.Decor.EmperorEgg.EggModel
-    end)
-    if best then
-        return best
+    local function raidAddGuid(out, seen, g)
+        if type(g) == "string" and #g == 16 and not seen[g] then
+            seen[g] = true
+            table.insert(out, g)
+        end
     end
-    pcall(function()
-        for _, d in ipairs(workspace:GetDescendants()) do
-            if d:IsA("BasePart") then
-                if string.find(string.lower(d.Name), "emperor", 1, true) then
+
+    local function raidWalkPets(out, seen, x, depth)
+        if type(x) ~= "table" or depth > 4 then
+            return
+        end
+        raidAddGuid(out, seen, x.GUID or x.Guid or x.guid or x._id)
+        for _, v in pairs(x) do
+            if type(v) == "string" then
+                raidAddGuid(out, seen, v)
+            elseif type(v) == "table" then
+                raidWalkPets(out, seen, v, depth + 1)
+            end
+        end
+    end
+
+    local function raidPetGuids()
+        local out, seen = {}, {}
+        local function grab(modName)
+            pcall(function()
+                local mod = require(ReplicatedStorage.Library.Client[modName])
+                if type(mod) ~= "table" then
+                    return
+                end
+                raidWalkPets(out, seen, mod.Pets or mod.Equipped or mod.Owned or mod, 0)
+                if type(mod.Get) == "function" then
+                    pcall(function()
+                        raidWalkPets(out, seen, mod.Get(), 0)
+                    end)
+                end
+                if type(mod.All) == "function" then
+                    pcall(function()
+                        raidWalkPets(out, seen, mod.All(), 0)
+                    end)
+                end
+            end)
+        end
+        grab("Pet")
+        grab("Pets")
+        grab("PlayerPet")
+        grab("Save")
+        pcall(function()
+            local things = workspace:FindFirstChild("_THINGS")
+            local folder = things and (things:FindFirstChild("Pets") or things:FindFirstChild("PlayerPets"))
+            if folder then
+                for _, inst in ipairs(folder:GetChildren()) do
+                    raidAddGuid(out, seen, inst:GetAttribute("GUID") or inst:GetAttribute("Guid") or inst.Name)
+                end
+            end
+        end)
+        pcall(function()
+            local c = LP.Character
+            if not c then
+                return
+            end
+            for _, inst in ipairs(c:GetDescendants()) do
+                raidAddGuid(out, seen, inst:GetAttribute("GUID") or inst:GetAttribute("PetGUID"))
+            end
+        end)
+        return out
+    end
+
+    local function raidSlotState(R)
+        local mine, empty
+        pcall(function()
+            local all = R.slots:InvokeServer()
+            if type(all) ~= "table" then
+                return
+            end
+            for _, info in pairs(all) do
+                if type(info) == "table" then
+                    if info.OwnerName == LP.Name or info.OwnerId == LP.UserId then
+                        mine = info.Slot
+                    elseif not empty and info.Started ~= true and (info.OwnerName == nil or info.OwnerName == "") then
+                        empty = info.Slot
+                    end
+                end
+            end
+        end)
+        return mine, empty
+    end
+
+    local function raidGroundY(pos)
+        local origin = pos + Vector3.new(0, 30, 0)
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        if LP.Character then
+            params.FilterDescendantsInstances = {LP.Character}
+        end
+        local hit = workspace:Raycast(origin, Vector3.new(0, -90, 0), params)
+        if hit then
+            return hit.Position.Y + 3.2
+        end
+        return pos.Y
+    end
+
+    local function raidSmoothTo(pos, lookAt)
+        local hrp = getHRP()
+        if not hrp then
+            return
+        end
+        local y = raidGroundY(pos)
+        local dest = Vector3.new(pos.X, y, pos.Z)
+        local look = lookAt or dest
+        local goal = CFrame.new(dest, Vector3.new(look.X, y, look.Z))
+        local startCf = hrp.CFrame
+        for i = 1, 4 do
+            if hrp.Parent then
+                hrp.CFrame = startCf:Lerp(goal, i / 4)
+            end
+            task.wait(0.01)
+        end
+        if hrp.Parent then
+            hrp.CFrame = goal
+        end
+    end
+
+    local function raidRoomGates()
+        local out = {}
+        local rooms
+        pcall(function()
+            rooms = workspace._THINGS.Minigames.RaidLobby.Rooms
+        end)
+        if not rooms then
+            return out
+        end
+        for i = 1, 6 do
+            local room = rooms:FindFirstChild(tostring(i))
+            if room then
+                local gate = room:FindFirstChild("Gate")
+                local hit = gate and gate:FindFirstChild("Hitbox")
+                if hit then
+                    table.insert(out, {n = i, part = hit, room = room})
+                end
+            end
+        end
+        return out
+    end
+
+    local function raidPushPath(R, pets)
+        local gates = raidRoomGates()
+        if #gates == 0 then
+            raidSay("No Rooms.Gate")
+            return
+        end
+        for i = 1, #gates do
+            if not Raid.on then
+                break
+            end
+            local g = gates[i]
+            raidSay("Gate " .. tostring(g.n) .. " / 6")
+            local part = g.part
+            local hrp = getHRP()
+            if not hrp then
+                break
+            end
+            local flat = Vector3.new(part.Position.X - hrp.Position.X, 0, part.Position.Z - hrp.Position.Z)
+            if flat.Magnitude < 0.05 then
+                flat = Vector3.new(0, 0, -1)
+            else
+                flat = flat.Unit
+            end
+            raidSmoothTo(part.Position - flat * 5, part.Position)
+
+            local function hpNow()
+                local bh = g.room:FindFirstChild("BreakableHealth")
+                if not bh then
+                    return nil
+                end
+                local lab = bh:FindFirstChild("Label", true)
+                if not (lab and lab:IsA("TextLabel")) then
+                    return nil
+                end
+                return tonumber(string.match(lab.Text or "", "([%d%.]+)%s*/"))
+            end
+
+            local hitting = true
+            task.spawn(function()
+                while hitting and Raid.on do
+                    for p = 1, #pets do
+                        if not hitting then
+                            break
+                        end
+                        task.spawn(function()
+                            raidInvoke(R.hit, tostring(g.n), pets[p])
+                        end)
+                    end
+                    task.wait(0.08)
+                end
+            end)
+
+            local t0 = os.clock()
+            local seenHp
+            local damaged = false
+            while Raid.on do
+                local hp = hpNow()
+                if hp then
+                    seenHp = seenHp or hp
+                    if hp < seenHp then
+                        damaged = true
+                    end
+                end
+                if hp == 0 then
+                    break
+                end
+                if damaged and hp == nil then
+                    break
+                end
+                if os.clock() - t0 > 15 then
+                    break
+                end
+                task.wait(0.04)
+            end
+            hitting = false
+        end
+    end
+
+    local function findEmperor()
+        local best
+        pcall(function()
+            best = workspace._THINGS.Minigames.RaidEvent.Map.Scenery.Decor.EmperorEgg.EggModel
+        end)
+        if best then
+            return best
+        end
+        pcall(function()
+            for _, d in ipairs(workspace:GetDescendants()) do
+                if d:IsA("BasePart") and string.find(string.lower(d.Name), "emperor", 1, true) then
                     best = d
                     break
                 end
             end
-        end
-    end)
-    return best
-end
-
-local function hatchEmperor()
-    if not hatchAfterRaid then
-        raidSay("Hatch skipped")
-        return
-    end
-    raidSay("Hatch Emperor")
-    local part = findEmperor()
-    pcall(function()
-        if part then
-            local cf = part:IsA("Model") and part:GetPivot() or part.CFrame
-            local hrp = getHRP()
-            if hrp then
-                hrp.CFrame = cf * CFrame.new(0, 3, 6)
-            end
-        end
-    end)
-    task.wait(0.45)
-    local amt = 12
-    task.spawn(function()
-        pcall(function()
-            local OpenEgg = require(ReplicatedStorage.Library.Client.OpenEgg)
-            pcall(function()
-                OpenEgg.Request("EmperorEgg", amt)
-            end)
-            pcall(function()
-                OpenEgg.Play("EmperorEgg", amt)
-            end)
         end)
-        local guid = HttpService:GenerateGUID(false)
-        local list = remotes:GetChildren()
-        for _, i in ipairs({91, 90, 92, 89}) do
-            local ev = list[i]
-            if ev and ev:IsA("RemoteFunction") then
-                pcall(function()
-                    ev:InvokeServer("EmperorEgg", amt, guid)
-                end)
-            end
-        end
-    end)
-    task.wait(1.4)
-    raidSay("Hatch done")
-end
+        return best
+    end
 
-local function raidGo()
-    raidBusy = true
-    raidSay("Resolve remotes")
-    local R = findRaidCluster()
-    task.wait(0.2)
-    local mine, empty = raidSlotState(R)
-    local slot = mine or empty or 1
-    local claimed = mine ~= nil
-    if mine then
-        raidSay("Reuse slot " .. tostring(mine))
-    else
-        claimed = raidInvoke(R.claim, slot) == true
-        if not claimed then
-            for i = 1, 10 do
-                if raidInvoke(R.claim, i) == true then
-                    slot, claimed = i, true
-                    break
+    local function hatchEmperor()
+        if not Raid.hatch then
+            raidSay("Hatch skipped")
+            return
+        end
+        raidSay("Hatch Emperor")
+        local part = findEmperor()
+        pcall(function()
+            if part then
+                local cf = part:IsA("Model") and part:GetPivot() or part.CFrame
+                local hrp = getHRP()
+                if hrp then
+                    hrp.CFrame = cf * CFrame.new(0, 3, 6)
+                end
+            end
+        end)
+        task.wait(0.45)
+        local amt = 12
+        task.spawn(function()
+            pcall(function()
+                local OpenEgg = require(ReplicatedStorage.Library.Client.OpenEgg)
+                pcall(function()
+                    OpenEgg.Request("EmperorEgg", amt)
+                end)
+                pcall(function()
+                    OpenEgg.Play("EmperorEgg", amt)
+                end)
+            end)
+            local guid = HttpService:GenerateGUID(false)
+            local list = remotes:GetChildren()
+            for _, i in ipairs({91, 90, 92, 89}) do
+                local ev = list[i]
+                if ev and ev:IsA("RemoteFunction") then
+                    pcall(function()
+                        ev:InvokeServer("EmperorEgg", amt, guid)
+                    end)
+                end
+            end
+        end)
+        task.wait(1.4)
+        raidSay("Hatch done")
+    end
+
+    local function raidGo()
+        Raid.busy = true
+        raidSay("Resolve remotes")
+        local R = findRaidCluster()
+        task.wait(0.2)
+        local mine, empty = raidSlotState(R)
+        local slot = mine or empty or 1
+        local claimed = mine ~= nil
+        if mine then
+            raidSay("Reuse slot " .. tostring(mine))
+        else
+            claimed = raidInvoke(R.claim, slot) == true
+            if not claimed then
+                for i = 1, 10 do
+                    if raidInvoke(R.claim, i) == true then
+                        slot, claimed = i, true
+                        break
+                    end
                 end
             end
         end
-    end
-    if not claimed and R.unclaim then
-        for i = 1, 10 do
-            raidInvoke(R.unclaim, i)
-        end
-        task.wait(0.4)
-        mine, empty = raidSlotState(R)
-        slot = empty or 1
-        claimed = raidInvoke(R.claim, slot) == true
-    end
-    if not claimed then
-        raidSay("No empty slot")
-        raidBusy = false
-        return
-    end
-
-    pcall(grabRaidStats)
-    local want = raidDiffFromLvl(cachedRaidLvl)
-    local set
-    for d = want, 1, -1 do
-        if raidInvoke(R.cfg, slot, d, "Public") then
-            set = d
-            break
-        end
-    end
-    raidSay("Diff " .. tostring(set or want) .. " lvl " .. tostring(cachedRaidLvl))
-
-    local started = raidInvoke(R.start, slot)
-    raidSay("Start " .. tostring(started))
-
-    if Init then
-        pcall(function()
-            Init:FireServer("RaidPortals", "RemoteEvent", "SlotUpdated")
-            Init:FireServer("RaidGates", "RemoteEvent", "State")
-            Init:FireServer("RaidGates", "RemoteEvent", "Snapshot")
-        end)
-    end
-    raidInvoke(R.lobbyRF, "RaidLobby")
-    pcall(function()
-        if R.lobbyRE and R.lobbyRE.FireServer then
-            R.lobbyRE:FireServer("RaidLobby")
-        end
-    end)
-
-    raidSay("Wait instance")
-    task.wait(0.4)
-    local pets = raidPetGuids()
-    if #pets == 0 then
-        raidSay("No pets")
-        raidBusy = false
-        return
-    end
-    local readyAt = os.clock()
-    while #raidRoomGates() == 0 and os.clock() - readyAt < 6 and raidOn do
-        raidSay("Wait rooms")
-        task.wait(0.2)
-    end
-    if #raidRoomGates() == 0 then
-        raidSay("No rooms")
-        raidBusy = false
-        return
-    end
-    raidPushPath(R, pets)
-    sessionRaids = sessionRaids + 1
-
-    raidSay("Leaving")
-    task.wait(0.35)
-    pcall(function()
-        raidInvoke(R.leave)
-    end)
-    task.wait(0.3)
-    pcall(function()
-        if R.unclaim then
-            raidInvoke(R.unclaim, slot)
-        end
-    end)
-    raidSay("Wait hatch world")
-    task.wait(1.2)
-    pcall(hatchEmperor)
-    if hatchAfterRaid then
-        sessionEggs = sessionEggs + 12
-    end
-    raidBusy = false
-    raidSay(raidOn and "Loop" or "Done")
-end
-
-local function startRaidLoop()
-    if raidThread then
-        return
-    end
-    raidOn = true
-    raidFarmOnAt = os.clock()
-    raidThread = task.spawn(function()
-        while raidOn do
-            local ok, err = pcall(raidGo)
-            if not ok then
-                raidSay("Retry")
-                print("[raid] err", err)
+        if not claimed and R.unclaim then
+            for i = 1, 10 do
+                raidInvoke(R.unclaim, i)
             end
-            if not raidOn then
+            task.wait(0.4)
+            mine, empty = raidSlotState(R)
+            slot = empty or 1
+            claimed = raidInvoke(R.claim, slot) == true
+        end
+        if not claimed then
+            raidSay("No empty slot")
+            Raid.busy = false
+            return
+        end
+
+        pcall(grabRaidStats)
+        local want = raidDiffFromLvl(Raid.lvl)
+        local set
+        for d = want, 1, -1 do
+            local okCfg = raidInvoke(R.cfg, slot, d, "Public")
+            if okCfg == true then
+                set = d
                 break
             end
-            raidSay("Next raid")
-            task.wait(1.4)
         end
-        raidBusy = false
-        raidThread = nil
-        raidSay("Stopped")
-    end)
-end
+        if not set then
+            set = 1
+            raidInvoke(R.cfg, slot, 1, "Public")
+        end
+        raidSay("Diff " .. tostring(set) .. " want " .. tostring(want) .. " lvl " .. tostring(Raid.lvl))
 
-local function stopRaidLoop()
-    raidOn = false
-    raidBusy = false
-    raidThread = nil
-    if raidFarmOnAt > 0 then
-        raidFarmAcc = raidFarmAcc + (os.clock() - raidFarmOnAt)
-        raidFarmOnAt = 0
+        local started = raidInvoke(R.start, slot)
+        raidSay("Start " .. tostring(started))
+
+        if Init then
+            pcall(function()
+                Init:FireServer("RaidPortals", "RemoteEvent", "SlotUpdated")
+                Init:FireServer("RaidGates", "RemoteEvent", "State")
+                Init:FireServer("RaidGates", "RemoteEvent", "Snapshot")
+            end)
+        end
+        raidInvoke(R.lobbyRF, "RaidLobby")
+        pcall(function()
+            if R.lobbyRE and R.lobbyRE.FireServer then
+                R.lobbyRE:FireServer("RaidLobby")
+            end
+        end)
+
+        raidSay("Wait instance")
+        task.wait(0.4)
+        local pets = raidPetGuids()
+        local petWait = os.clock()
+        while #pets == 0 and os.clock() - petWait < 3 and Raid.on do
+            task.wait(0.25)
+            pets = raidPetGuids()
+        end
+        if #pets == 0 then
+            raidSay("No pets")
+            pcall(function()
+                raidInvoke(R.leave)
+            end)
+            pcall(function()
+                if R.unclaim then
+                    raidInvoke(R.unclaim, slot)
+                end
+            end)
+            Raid.busy = false
+            return
+        end
+        raidSay("Pets " .. tostring(#pets))
+        local readyAt = os.clock()
+        while #raidRoomGates() == 0 and os.clock() - readyAt < 6 and Raid.on do
+            raidSay("Wait rooms")
+            task.wait(0.2)
+        end
+        if #raidRoomGates() == 0 then
+            raidSay("No rooms")
+            pcall(function()
+                raidInvoke(R.leave)
+            end)
+            Raid.busy = false
+            return
+        end
+        raidPushPath(R, pets)
+        Raid.raids = Raid.raids + 1
+
+        raidSay("Leaving")
+        task.wait(0.35)
+        pcall(function()
+            raidInvoke(R.leave)
+        end)
+        task.wait(0.3)
+        pcall(function()
+            if R.unclaim then
+                raidInvoke(R.unclaim, slot)
+            end
+        end)
+        raidSay("Wait hatch world")
+        task.wait(1.2)
+        pcall(hatchEmperor)
+        if Raid.hatch then
+            Raid.eggs = Raid.eggs + 12
+        end
+        Raid.busy = false
+        raidSay(Raid.on and "Loop" or "Done")
     end
-    raidSay("Stopped")
+
+    local raidThread
+    local function startRaidLoop()
+        if raidThread then
+            return
+        end
+        Raid.on = true
+        Raid.onAt = os.clock()
+        raidThread = task.spawn(function()
+            while Raid.on do
+                local ok, err = pcall(raidGo)
+                if not ok then
+                    raidSay("Retry")
+                    print("[raid] err", err)
+                end
+                if not Raid.on then
+                    break
+                end
+                raidSay("Next raid")
+                task.wait(1.4)
+            end
+            Raid.busy = false
+            raidThread = nil
+            raidSay("Stopped")
+        end)
+    end
+
+    local function stopRaidLoop()
+        Raid.on = false
+        Raid.busy = false
+        raidThread = nil
+        if Raid.onAt > 0 then
+            Raid.acc = Raid.acc + (os.clock() - Raid.onAt)
+            Raid.onAt = 0
+        end
+        raidSay("Stopped")
+    end
+
+    Raid.grab = grabRaidStats
+    Raid.fmtNum = raidFmtNum
+    Raid.farmSec = raidFarmSec
+    Raid.fmtTime = raidFmtTime
+    Raid.start = startRaidLoop
+    Raid.stop = stopRaidLoop
 end
+bootRaid()
 
 local function getHost()
     local pg = LP.PlayerGui
@@ -2138,7 +2223,20 @@ local function getHost()
     return pg
 end
 
+local function bootUi()
+local open = true
 local host = getHost()
+local overlay = LP.PlayerGui:FindFirstChild("OsamaSide")
+if overlay then
+    overlay:Destroy()
+end
+overlay = Instance.new("ScreenGui")
+overlay.Name = "OsamaSide"
+overlay.ResetOnSpawn = false
+overlay.IgnoreGuiInset = true
+overlay.DisplayOrder = 120
+overlay.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+overlay.Parent = LP.PlayerGui
 pcall(function()
     local old = host:FindFirstChild("OsamaHub")
     if old then
@@ -2190,7 +2288,7 @@ end
 
 local Panel = Instance.new("Frame")
 Panel.Name = "OsamaHub"
-Panel.Size = UDim2.new(0, 236, 0, 482)
+Panel.Size = UDim2.new(0, 236, 0, 338)
 Panel.Position = UDim2.new(0, 16, 0.22, 0)
 Panel.BackgroundColor3 = BG
 Panel.BorderSizePixel = 0
@@ -2314,11 +2412,16 @@ local function setToggle(pill, knob, on, onColor)
 end
 
 local stats = Instance.new("Frame")
-stats.Size = UDim2.new(1, -20, 0, 148)
-stats.Position = UDim2.new(0, 10, 0, 326)
-stats.BackgroundColor3 = CARD
+stats.Name = "OsamaRngCard"
+stats.Size = UDim2.new(0, 188, 0, 168)
+stats.Position = UDim2.new(1, 12, 0, 0)
+stats.BackgroundColor3 = BG
+stats.BorderSizePixel = 0
+stats.Visible = false
+stats.ZIndex = 80
 stats.Parent = Panel
-corner(stats, 12)
+corner(stats, 14)
+stroke(stats, Color3.fromRGB(48, 52, 64), 0.35)
 
 Status = txt(stats, {
     Size = UDim2.new(1, -16, 0, 14),
@@ -2374,68 +2477,49 @@ local function stockLine()
     return table.concat(bits, " / ")
 end
 
-SidePanel = Instance.new("Frame")
-SidePanel.Name = "OsamaMercCard"
-SidePanel.Size = UDim2.new(0, 188, 0, 156)
-SidePanel.Position = UDim2.new(0, 260, 0.22, 48)
-SidePanel.BackgroundColor3 = BG
-SidePanel.BorderSizePixel = 0
-SidePanel.Visible = false
-SidePanel.ZIndex = 50
-SidePanel.Parent = host
-corner(SidePanel, 14)
-stroke(SidePanel, Color3.fromRGB(48, 52, 64), 0.35)
-
-txt(SidePanel, {
-    Size = UDim2.new(1, -16, 0, 16),
-    Position = UDim2.new(0, 10, 0, 8),
-    Text = "DICE MERCHANT",
-    Font = Enum.Font.GothamBold,
-    TextSize = 12,
-    TextColor3 = ACCENT4
+SidePanel = stats
+txt(stats, {
+    Size = UDim2.new(1, -16, 0, 14),
+    Position = UDim2.new(0, 10, 0, 148),
+    Text = "",
+    Font = Enum.Font.Gotham,
+    TextSize = 9,
+    TextColor3 = MUTED
 })
 
-local function sideRow(y, key)
-    txt(SidePanel, {
-        Size = UDim2.new(0.48, 0, 0, 16),
-        Position = UDim2.new(0, 10, 0, y),
-        Text = key,
-        Font = Enum.Font.Gotham,
-        TextSize = 10,
-        TextColor3 = MUTED
-    })
-    return txt(SidePanel, {
-        Size = UDim2.new(0.46, 0, 0, 16),
-        Position = UDim2.new(0.50, 0, 0, y),
-        Text = "-",
-        Font = Enum.Font.GothamBold,
-        TextSize = 11,
-        TextXAlignment = Enum.TextXAlignment.Right
-    })
-end
+SideMerc, SideStock, SideCoins, SideCost, SideEta = nil, nil, nil, nil, nil
 
-SideMerc = sideRow(32, "RESTOCK")
-SideStock = sideRow(54, "STOCK")
-SideCoins = sideRow(76, "COINS")
-SideCost = sideRow(98, "REBIRTH")
-SideEta = sideRow(120, "ETA")
-
-local function setSideVisible(on)
-    if not SidePanel then
-        return
+local RaidCard, RaidStatusLbl, RaidLvlLbl, RaidPtsLbl, RaidCountLbl, RaidEggLbl, RaidTimeLbl
+local hatchUiOn = true
+local function layoutSides()
+    local rngOn = running or merchantOn or comboOn or autoRollOn
+    local raidShow = Raid.on or hatchUiOn
+    if stats then
+        stats.Visible = rngOn
+        stats.Position = UDim2.new(1, 12, 0, 0)
     end
-    SidePanel.Visible = on and true or false
+    if RaidCard then
+        RaidCard.Visible = raidShow
+        if rngOn then
+            RaidCard.Position = UDim2.new(1, 12, 0, 178)
+        else
+            RaidCard.Position = UDim2.new(1, 12, 0, 0)
+        end
+    end
+end
+local function setSideVisible(on)
+    layoutSides()
 end
 
 RaidCard = Instance.new("Frame")
 RaidCard.Name = "OsamaRaidCard"
 RaidCard.Size = UDim2.new(0, 188, 0, 168)
-RaidCard.Position = UDim2.new(0, 260, 0.22, 214)
+RaidCard.Position = UDim2.new(1, 12, 0, 0)
 RaidCard.BackgroundColor3 = BG
 RaidCard.BorderSizePixel = 0
-RaidCard.Visible = true
-RaidCard.ZIndex = 50
-RaidCard.Parent = host
+RaidCard.Visible = false
+RaidCard.ZIndex = 80
+RaidCard.Parent = Panel
 corner(RaidCard, 14)
 stroke(RaidCard, Color3.fromRGB(48, 52, 64), 0.35)
 
@@ -2480,6 +2564,8 @@ RaidPtsLbl = raidRow(64, "POINTS")
 RaidCountLbl = raidRow(84, "RAIDS")
 RaidEggLbl = raidRow(104, "EGGS")
 RaidTimeLbl = raidRow(124, "TIME")
+
+
 
 txt(Panel, {
     Size = UDim2.new(1, 0, 0, 12),
@@ -2590,7 +2676,6 @@ CloseBtn.MouseButton1Click:Connect(function()
     Warn:Destroy()
 end)
 
-local open = true
 local tw = TweenInfo.new(0.32, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 local function toggleGui()
     open = not open
@@ -2598,15 +2683,18 @@ local function toggleGui()
         TweenService:Create(Panel, tw, {
             Position = open and UDim2.new(0, 16, 0.22, 0) or UDim2.new(0, -270, 0.22, 0)
         }):Play()
-        if SidePanel then
-            TweenService:Create(SidePanel, tw, {
-                Position = open and UDim2.new(0, 260, 0.22, 48) or UDim2.new(0, -220, 0.22, 48)
-            }):Play()
-        end
-        if RaidCard then
-            TweenService:Create(RaidCard, tw, {
-                Position = open and UDim2.new(0, 260, 0.22, 214) or UDim2.new(0, -220, 0.22, 214)
-            }):Play()
+        layoutSides()
+        if not open then
+            if stats then
+                TweenService:Create(stats, tw, {
+                    Position = UDim2.new(0, -220, 0.22, 0)
+                }):Play()
+            end
+            if RaidCard then
+                TweenService:Create(RaidCard, tw, {
+                    Position = UDim2.new(0, -220, 0.22, 0)
+                }):Play()
+            end
         end
     end)
 end
@@ -2627,7 +2715,7 @@ RunService.Heartbeat:Connect(function()
     end
     lastUi = tick()
     pcall(updateCoins)
-    pcall(grabRaidStats)
+    if Raid.grab then pcall(Raid.grab) end
     pcall(updateRebirthCost)
     pcall(updateRate)
     pcall(refreshEtaAvg)
@@ -2672,23 +2760,24 @@ RunService.Heartbeat:Connect(function()
             SideEta.Text = etaText
         end
         if RaidStatusLbl then
-            RaidStatusLbl.Text = raidStatusText
+            RaidStatusLbl.Text = Raid.status
         end
         if RaidLvlLbl then
-            RaidLvlLbl.Text = tostring(cachedRaidLvl)
+            RaidLvlLbl.Text = tostring(Raid.lvl)
         end
         if RaidPtsLbl then
-            RaidPtsLbl.Text = raidFmtNum(cachedRaidPoints)
+            RaidPtsLbl.Text = Raid.fmtNum(Raid.points)
         end
         if RaidCountLbl then
-            RaidCountLbl.Text = tostring(sessionRaids)
+            RaidCountLbl.Text = tostring(Raid.raids)
         end
         if RaidEggLbl then
-            RaidEggLbl.Text = tostring(sessionEggs)
+            RaidEggLbl.Text = tostring(Raid.eggs)
         end
         if RaidTimeLbl then
-            RaidTimeLbl.Text = raidFmtTime(raidFarmSec())
+            RaidTimeLbl.Text = Raid.fmtTime(Raid.farmSec())
         end
+        layoutSides()
     end)
 end)
 
@@ -2791,6 +2880,7 @@ CycleBtn.MouseButton1Click:Connect(function()
         startCycle()
         setToggle(CyclePill, CycleKnob, true, ACCENT)
     end
+    layoutSides()
 end)
 
 MercBtn.MouseButton1Click:Connect(function()
@@ -2800,10 +2890,12 @@ MercBtn.MouseButton1Click:Connect(function()
         stopCycle()
     end
     setMerchantMode(not merchantOn)
+    layoutSides()
 end)
 
 ComboBtn.MouseButton1Click:Connect(function()
     setCombo(not comboOn)
+    layoutSides()
 end)
 
 RollBtn.MouseButton1Click:Connect(function()
@@ -2815,6 +2907,7 @@ RollBtn.MouseButton1Click:Connect(function()
     else
         stopAutoRoll()
     end
+    layoutSides()
 end)
 
 AfkBtn.MouseButton1Click:Connect(function()
@@ -2828,18 +2921,21 @@ AfkBtn.MouseButton1Click:Connect(function()
 end)
 
 RaidBtn.MouseButton1Click:Connect(function()
-    if raidOn then
-        stopRaidLoop()
+    if Raid.on then
+        Raid.stop()
         setToggle(RaidPill, RaidKnob, false, ACCENT2)
     else
-        startRaidLoop()
+        Raid.start()
         setToggle(RaidPill, RaidKnob, true, ACCENT2)
     end
+    layoutSides()
 end)
 
 HatchBtn.MouseButton1Click:Connect(function()
-    hatchAfterRaid = not hatchAfterRaid
-    setToggle(HatchPill, HatchKnob, hatchAfterRaid, ACCENT3)
+    Raid.hatch = not Raid.hatch
+    hatchUiOn = Raid.hatch
+    setToggle(HatchPill, HatchKnob, Raid.hatch, ACCENT3)
+    layoutSides()
 end)
 
 afkEnabled = true
@@ -2847,3 +2943,5 @@ setToggle(AfkPill, AfkKnob, true, ACCENT2)
 startAntiAFK()
 setToggle(HatchPill, HatchKnob, true, ACCENT3)
 print("[osamahub] ready")
+end
+bootUi()
