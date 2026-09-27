@@ -1913,6 +1913,7 @@ local function doFullCycle()
     end
 end
 
+local function buildUi()
 local function getHost()
     local pg = LP.PlayerGui
     local main = pg:FindFirstChild("Main")
@@ -2569,3 +2570,5 @@ afkEnabled = true
 setToggle(AfkPill, AfkKnob, true, ACCENT2)
 startAntiAFK()
 print("[osamahub] ready")
+end
+buildUi()
