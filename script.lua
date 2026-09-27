@@ -324,25 +324,73 @@ local function rngFire(a, b)
     end)
 end
 
-local function getBoardContent()
-    local ok, content = pcall(function()
-        return workspace._THINGS.Minigames.ServerOwned.RNGEvent.Interact.Boards.IncrementalBoard.Main.SurfaceGui.Bottom.Content
+local BOARD_NAMES = {
+    BreakablesIncremental = true,
+    PixelCoinsMultiplier = true,
+    LuckMultiplier = true,
+}
+
+local function findIncrementalBoard()
+    local cached
+    local ok, inst = pcall(function()
+        return workspace._THINGS.Minigames.ServerOwned.RNGEvent.Interact.Boards.IncrementalBoard
     end)
-    if ok then
+    if ok and inst then
+        return inst
+    end
+    ok, inst = pcall(function()
+        return workspace:FindFirstChild("IncrementalBoard", true)
+    end)
+    if ok and inst then
+        return inst
+    end
+    pcall(function()
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj.Name == "IncrementalBoard" or (obj.Name == "Content" and obj:FindFirstChild("LuckMultiplier")) then
+                cached = obj.Name == "IncrementalBoard" and obj or obj
+                break
+            end
+        end
+    end)
+    return cached
+end
+
+local function getBoardContent()
+    local board = findIncrementalBoard()
+    if not board then
+        return nil
+    end
+    if board.Name == "Content" then
+        return board
+    end
+    local content
+    pcall(function()
+        content = board.Main.SurfaceGui.Bottom.Content
+    end)
+    if content then
         return content
     end
+    pcall(function()
+        for _, d in ipairs(board:GetDescendants()) do
+            if d.Name == "Content" and (d:FindFirstChild("LuckMultiplier") or d:FindFirstChild("BreakablesIncremental") or d:FindFirstChild("PixelCoinsMultiplier")) then
+                content = d
+                break
+            end
+        end
+    end)
+    return content
 end
 
 local function waitBoard(timeout)
     local t = tick()
     while tick() - t < (timeout or 8) do
         local c = getBoardContent()
-        if c and c:FindFirstChild("BreakablesIncremental") then
+        if c then
             return true
         end
         task.wait(0.2)
     end
-    return false
+    return getBoardContent() ~= nil
 end
 
 local function fireBtn(btn)
@@ -368,6 +416,34 @@ local function fireBtn(btn)
             end)
         end
     end)
+    pcall(function()
+        if typeof(btn.Activate) == "function" then
+            btn:Activate()
+        end
+    end)
+end
+
+local function clickGui(obj)
+    if not obj then
+        return
+    end
+    fireBtn(obj)
+    pcall(function()
+        local pos = obj.AbsolutePosition
+        local size = obj.AbsoluteSize
+        if size.X < 2 or size.Y < 2 then
+            return
+        end
+        local cx = pos.X + size.X * 0.5
+        local cy = pos.Y + size.Y * 0.5
+        local inset = Vector2.new(0, 0)
+        pcall(function()
+            inset = game:GetService("GuiService"):GetGuiInset()
+        end)
+        clickScreen(cx, cy)
+        clickScreen(cx + inset.X, cy + inset.Y)
+        clickScreen(cx, cy + inset.Y)
+    end)
 end
 
 local function getMainGui()
@@ -385,22 +461,158 @@ local function getMainGui()
     return LP.PlayerGui:FindFirstChild("Main")
 end
 
-local function pressHide()
+local function getRollingFrame()
+    local main = getMainGui()
+    if main then
+        local r = main:FindFirstChild("Rolling")
+        if r then
+            return r
+        end
+    end
+    local pg = LP:FindFirstChild("PlayerGui")
+    if not pg then
+        return nil
+    end
+    local found
     pcall(function()
-        local main = getMainGui()
-        if main then
-            fireBtn(main.Rolling.Action.Hide.Button)
+        found = pg:FindFirstChild("Rolling", true)
+    end)
+    return found
+end
+
+local function rollGuiReady()
+    return getRollingFrame() ~= nil
+end
+
+local function collectRollBlob()
+    local blob = ""
+    local rolling = getRollingFrame()
+    if not rolling then
+        return blob
+    end
+    pcall(function()
+        for _, d in ipairs(rolling:GetDescendants()) do
+            if d:IsA("TextLabel") or d:IsA("TextButton") then
+                blob = blob .. " " .. string.lower(d.Text or "")
+            end
+        end
+    end)
+    return blob
+end
+
+local lastDiceCf, lastDiceMove = nil, 0
+
+local function diceMoving()
+    local rolling = getRollingFrame()
+    if not rolling then
+        return false
+    end
+    local moved = false
+    pcall(function()
+        for _, d in ipairs(rolling:GetDescendants()) do
+            if d:IsA("WorldModel") or d:IsA("ViewportFrame") or d:IsA("Model") then
+                local part = d:FindFirstChildWhichIsA("BasePart", true)
+                if part then
+                    local cf = part.CFrame
+                    if lastDiceCf and (cf.Position - lastDiceCf.Position).Magnitude > 0.02 then
+                        moved = true
+                    end
+                    lastDiceCf = cf
+                    break
+                end
+            end
+        end
+    end)
+    if moved then
+        lastDiceMove = tick()
+    end
+    return moved or (tick() - lastDiceMove < 1.2)
+end
+
+local function isDiceBusy()
+    local blob = collectRollBlob()
+    if blob:find("rolling", 1, true) or blob:find("hatching", 1, true) or blob:find("revealing", 1, true) then
+        return true
+    end
+    if blob:find("auto on", 1, true) or blob:find("stop auto", 1, true) then
+        return true
+    end
+    if diceMoving() then
+        return true
+    end
+    local ch = getRngChannel()
+    local busy = false
+    pcall(function()
+        if ch and ch.HasRolling then
+            busy = ch.HasRolling == true
+        end
+    end)
+    return busy
+end
+
+local function pressHide()
+    local rolling = getRollingFrame()
+    if not rolling then
+        return
+    end
+    pcall(function()
+        fireBtn(rolling.Action.Hide.Button)
+    end)
+    pcall(function()
+        for _, d in ipairs(rolling:GetDescendants()) do
+            if d:IsA("TextLabel") or d:IsA("TextButton") or d:IsA("ImageButton") then
+                local tx = string.lower((d.Text or d.Name or ""))
+                local title = d:FindFirstChild("Title")
+                if title then
+                    tx = tx .. " " .. string.lower(title.Text or "")
+                end
+                if tx:find("hide", 1, true) and d:IsA("GuiButton") then
+                    fireBtn(d)
+                elseif tx:find("hide", 1, true) and d.Parent and d.Parent:IsA("GuiButton") then
+                    fireBtn(d.Parent)
+                end
+            end
         end
     end)
 end
 
 local function pressAutoBtn()
+    local rolling = getRollingFrame()
+    if not rolling then
+        return
+    end
     pcall(function()
-        local main = getMainGui()
-        if main then
-            fireBtn(main.Rolling.Action.Auto.Button)
+        fireBtn(rolling.Action.Auto.Button)
+    end)
+    pcall(function()
+        for _, d in ipairs(rolling:GetDescendants()) do
+            if d:IsA("GuiButton") then
+                local tx = string.lower(d.Name or "")
+                local title = d:FindFirstChild("Title")
+                if title then
+                    tx = tx .. " " .. string.lower(title.Text or "")
+                end
+                if tx:find("auto", 1, true) and not tx:find("hide", 1, true) then
+                    fireBtn(d)
+                end
+            end
         end
     end)
+end
+
+local function kickAutoRoll()
+    rngFire("SetAutoRolling", true)
+    if not rollGuiReady() then
+        return
+    end
+    if isDiceBusy() then
+        pressHide()
+        return
+    end
+    pressAutoBtn()
+    task.wait(0.25)
+    rngFire("SetAutoRolling", true)
+    pressHide()
 end
 
 local function stopAutoRoll()
@@ -418,10 +630,7 @@ local function enableAutoRoll()
     if not autoRollOn then
         return
     end
-    rngFire("SetAutoRolling", true)
-    pressAutoBtn()
-    task.wait(0.4)
-    pressHide()
+    kickAutoRoll()
 end
 
 local function startRollWatch()
@@ -432,16 +641,41 @@ local function startRollWatch()
         rollThread = nil
     end
     rollThread = task.spawn(function()
-        local n = 0
+        local idleFor = 0
         while autoRollOn do
             rngFire("SetAutoRolling", true)
-            n = n + 1
-            if n % 2 == 1 then
-                pressAutoBtn()
-                task.wait(0.35)
-                pressHide()
+            if isDiceBusy() then
+                idleFor = 0
+            else
+                idleFor = idleFor + 0.7
+                if idleFor >= 1.4 then
+                    kickAutoRoll()
+                    idleFor = 0
+                end
             end
-            task.wait(4)
+            task.wait(0.7)
+        end
+    end)
+end
+
+local function recoverAutoRoll()
+    if not autoRollOn then
+        return
+    end
+    startRollWatch()
+    task.spawn(function()
+        local t = tick()
+        while autoRollOn and tick() - t < 6 do
+            rngFire("SetAutoRolling", true)
+            if isDiceBusy() then
+                pressHide()
+                return
+            end
+            if rollGuiReady() then
+                kickAutoRoll()
+                return
+            end
+            task.wait(0.3)
         end
     end)
 end
@@ -464,28 +698,101 @@ local function parseAmount(str)
     return num
 end
 
+local function parseLevelPair(text)
+    if not text then
+        return nil, nil
+    end
+    text = tostring(text):gsub(",", ""):gsub("%s+", "")
+    local a, b = text:match("(%d+)/(%d+)")
+    if a and b then
+        return tonumber(a), tonumber(b)
+    end
+end
+
+local function findUpgradeFrame(name)
+    local content = getBoardContent()
+    if not content then
+        return nil
+    end
+    local direct = content:FindFirstChild(name)
+    if direct then
+        return direct
+    end
+    local needles = {
+        BreakablesIncremental = { "breakable", "health" },
+        PixelCoinsMultiplier = { "pixel coin", "coins multiplier" },
+        LuckMultiplier = { "luck" },
+    }
+    local keys = needles[name]
+    if not keys then
+        return nil
+    end
+    for _, child in ipairs(content:GetChildren()) do
+        local blob = string.lower(child.Name)
+        pcall(function()
+            for _, d in ipairs(child:GetDescendants()) do
+                if d:IsA("TextLabel") or d:IsA("TextButton") then
+                    blob = blob .. " " .. string.lower(d.Text or "")
+                end
+            end
+        end)
+        local ok = true
+        for _, key in ipairs(keys) do
+            if not blob:find(key, 1, true) then
+                ok = false
+                break
+            end
+        end
+        if ok then
+            return child
+        end
+    end
+end
+
 local function getUpgradeLevel(name)
     local cur, maxLvl = 0, 1
     pcall(function()
-        local content = getBoardContent()
-        if not content then
+        local frame = findUpgradeFrame(name)
+        if not frame then
             return
         end
-        local a, b = content[name].Main.Lvl.Text:match("(%d+)/(%d+)")
-        cur = tonumber(a) or 0
-        maxLvl = tonumber(b) or 1
+        local bestA, bestB
+        local function consider(text)
+            local a, b = parseLevelPair(text)
+            if a and b and b >= 10 then
+                if not bestB or b > bestB then
+                    bestA, bestB = a, b
+                end
+            end
+        end
+        pcall(function()
+            consider(frame.Main.Lvl.Text)
+        end)
+        for _, d in ipairs(frame:GetDescendants()) do
+            if d:IsA("TextLabel") or d:IsA("TextButton") then
+                consider(d.Text)
+            end
+        end
+        if bestA then
+            cur, maxLvl = bestA, bestB
+        end
     end)
     return cur, maxLvl
 end
 
 local function allUpgradesMaxed()
+    local seen = 0
     for _, name in ipairs({"BreakablesIncremental", "PixelCoinsMultiplier", "LuckMultiplier"}) do
         local cur, maxLvl = getUpgradeLevel(name)
-        if maxLvl <= 1 or cur < maxLvl then
+        if maxLvl <= 1 then
+            return false
+        end
+        seen = seen + 1
+        if cur < maxLvl then
             return false
         end
     end
-    return true
+    return seen == 3
 end
 
 local function upgradesReset()
@@ -495,29 +802,42 @@ local function upgradesReset()
     return b < 20 and p < 50 and l < 20
 end
 
+local function buyRemote(name, n)
+    if not Network then
+        return
+    end
+    n = n or 50
+    pcall(function()
+        Network.InvokeServer(name, n)
+    end)
+    pcall(function()
+        Network.InvokeServer(name, 1)
+    end)
+end
+
 local function buyOne(name)
-    local content = getBoardContent()
-    if not content then
+    local n = 50
+    local frame = findUpgradeFrame(name)
+    if frame then
+        local buyMaxBtn = frame:FindFirstChild("Buttons") and frame.Buttons:FindFirstChild("BuyMax") and frame.Buttons.BuyMax:FindFirstChild("Button")
+        local title = buyMaxBtn and buyMaxBtn:FindFirstChild("Title")
+        if title and title.Text then
+            n = tonumber(title.Text:match("%((%d+)%)")) or n
+        end
+        if n < 1 then
+            n = 1
+        end
+        buyRemote(name, n)
+        if buyMaxBtn then
+            fireBtn(buyMaxBtn)
+        end
+        local buyBtn = frame:FindFirstChild("Buttons") and frame.Buttons:FindFirstChild("Buy") and frame.Buttons.Buy:FindFirstChild("Button")
+        if buyBtn then
+            fireBtn(buyBtn)
+        end
         return
     end
-    local frame = content:FindFirstChild(name)
-    if not frame then
-        return
-    end
-    local buyMaxBtn = frame:FindFirstChild("Buttons") and frame.Buttons:FindFirstChild("BuyMax") and frame.Buttons.BuyMax:FindFirstChild("Button")
-    local title = buyMaxBtn and buyMaxBtn:FindFirstChild("Title")
-    local n = 0
-    if title and title.Text then
-        n = tonumber(title.Text:match("%((%d+)%)")) or 0
-    end
-    if n > 0 and buyMaxBtn then
-        fireBtn(buyMaxBtn)
-        return
-    end
-    local buyBtn = frame:FindFirstChild("Buttons") and frame.Buttons:FindFirstChild("Buy") and frame.Buttons.Buy:FindFirstChild("Button")
-    if buyBtn then
-        fireBtn(buyBtn)
-    end
+    buyRemote(name, n)
 end
 
 local function buyAllOnce()
@@ -646,23 +966,32 @@ end
 
 local function pressRebirth(gui)
     gui = gui or rebirthGuiOpen()
+    pcall(function()
+        Network.InvokeServer("RNGRebirth")
+    end)
+    pcall(function()
+        Network.InvokeServer("Rebirth")
+    end)
+    pcall(function()
+        Network.InvokeServer("DoRebirth")
+    end)
     if not gui then
         return
     end
     pcall(function()
-        fireBtn(gui.Frame.Content.Rebirth.Button)
+        clickGui(gui.Frame.Content.Rebirth.Button)
     end)
     for _, obj in ipairs(gui:GetDescendants()) do
         if obj:IsA("ImageButton") or obj:IsA("TextButton") or obj:IsA("GuiButton") then
             local title = obj:FindFirstChild("Title", true)
             local tx = string.lower(((title and title.Text) or obj.Text or obj.Name or ""))
             if tx:find("rebirth") then
-                fireBtn(obj)
+                clickGui(obj)
             end
         elseif obj:IsA("TextLabel") then
             local tx = string.lower(obj.Text or "")
             if tx:find("rebirth!") and obj.Parent and obj.Parent:IsA("GuiButton") then
-                fireBtn(obj.Parent)
+                clickGui(obj.Parent)
             end
         end
     end
@@ -735,16 +1064,15 @@ local function clickScreen(x, y)
 end
 
 local function fireMerchantBtn(btn)
-    if not btn then
-        return
-    end
+    clickGui(btn)
+    local off
     pcall(function()
-        local pos = btn.AbsolutePosition
-        local size = btn.AbsoluteSize
-        local inset = game:GetService("GuiService"):GetGuiInset()
-        clickScreen(pos.X + size.X * 0.5, pos.Y + size.Y * 0.5 + inset.Y)
+        local name = btn:GetFullName()
+        local slot = tonumber(name:match("Offer_(%d+)"))
+        if slot then
+            buyOfferRemote(slot)
+        end
     end)
-    fireBtn(btn)
 end
 
 local function readOfferStock(offer)
@@ -1007,10 +1335,6 @@ local function visitMerchant()
     end
     lastMerchantVisit = tick()
     merchantBusy = false
-    if autoRollOn then
-        startRollWatch()
-        enableAutoRoll()
-    end
 end
 
 local function merchantDue()
@@ -1067,7 +1391,7 @@ local function onRebirthSuccess()
     task.wait(1.5)
     if autoRollOn then
         startRollWatch()
-        enableAutoRoll()
+        recoverAutoRoll()
     end
 end
 
@@ -1116,7 +1440,10 @@ local function visitVoid()
 end
 
 local function farmWinter()
-    waitBoard(6)
+    local hasBoard = waitBoard(6)
+    if not hasBoard then
+        setStatus("Winter board missing - remote buy")
+    end
     local started = tick()
     while running do
         if merchantDue() then
@@ -1128,7 +1455,15 @@ local function farmWinter()
             local b, bm = getUpgradeLevel("BreakablesIncremental")
             local p, pm = getUpgradeLevel("PixelCoinsMultiplier")
             local l, lm = getUpgradeLevel("LuckMultiplier")
-            if b < bm or p < pm then
+            if not hasBoard then
+                hasBoard = waitBoard(1)
+                setStatus("Buying upgrades (remote)")
+                buyRemote("BreakablesIncremental", 50)
+                buyRemote("PixelCoinsMultiplier", 50)
+                if b >= bm and p >= pm then
+                    buyRemote("LuckMultiplier", 50)
+                end
+            elseif b < bm or p < pm then
                 setStatus(string.format("Coins + Break  %d/%d  %d/%d", b, bm, p, pm))
             else
                 setStatus(string.format("Luck  %d/%d", l, lm))
@@ -1163,7 +1498,7 @@ local function doFullCycle()
     end
     goWinter()
     if autoRollOn then
-        enableAutoRoll()
+        recoverAutoRoll()
     end
     while running do
         local result = farmWinter()
@@ -1174,14 +1509,14 @@ local function doFullCycle()
             visitMerchant()
             goWinter()
             if autoRollOn then
-                enableAutoRoll()
+                recoverAutoRoll()
             end
         elseif result == "need_void" then
             if merchantDue() then
                 visitMerchant()
                 goWinter()
                 if autoRollOn then
-                    enableAutoRoll()
+                    recoverAutoRoll()
                 end
             else
                 local r = visitVoid()
@@ -1189,7 +1524,7 @@ local function doFullCycle()
                     visitMerchant()
                     goWinter()
                     if autoRollOn then
-                        enableAutoRoll()
+                        recoverAutoRoll()
                     end
                 elseif r == "success" then
                     setStatus("Restarting farm")
@@ -1198,7 +1533,7 @@ local function doFullCycle()
                     end
                     goWinter()
                     if autoRollOn then
-                        enableAutoRoll()
+                        recoverAutoRoll()
                     end
                 end
             end
@@ -1756,7 +2091,7 @@ local function setMerchantMode(on)
                 pcall(goWinter)
                 if autoRollOn then
                     startRollWatch()
-                    enableAutoRoll()
+                    recoverAutoRoll()
                 end
             end
         end)
@@ -1813,7 +2148,7 @@ RollBtn.MouseButton1Click:Connect(function()
     setToggle(RollPill, RollKnob, autoRollOn, ACCENT3)
     if autoRollOn then
         startRollWatch()
-        enableAutoRoll()
+        recoverAutoRoll()
     else
         stopAutoRoll()
     end
