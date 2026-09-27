@@ -8,7 +8,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 repeat task.wait() until game:IsLoaded()
 repeat task.wait() until Players.LocalPlayer
 local LP = Players.LocalPlayer
-local F = {}
 print("[osamahub] boot")
 repeat task.wait() until LP:FindFirstChild("PlayerGui")
 
@@ -74,11 +73,11 @@ local LINE = Color3.fromRGB(36, 40, 50)
 local MUTED = Color3.fromRGB(128, 134, 148)
 local WHITE = Color3.fromRGB(240, 242, 246)
 
-function F.setStatus(t)
+local function setStatus(t)
     statusText = tostring(t or "")
 end
 
-function F.formatTime(sec)
+local function formatTime(sec)
     if not sec or sec ~= sec or sec < 0 then
         return "-"
     end
@@ -95,7 +94,7 @@ function F.formatTime(sec)
     return string.format("%ds", s)
 end
 
-function F.formatCoins(n)
+local function formatCoins(n)
     if type(n) ~= "number" or n ~= n then
         return "-"
     end
@@ -115,20 +114,20 @@ function F.formatCoins(n)
     return tostring(math.floor(n + 0.5))
 end
 
-function F.updateCoins()
+local function updateCoins()
     if not Currency or type(Currency.Get) ~= "function" then
         return
     end
     local n = Currency.Get("PixelCoins")
     if type(n) == "number" then
         cachedCoinsNum = n
-        cachedCoinsText = F.formatCoins(n)
+        cachedCoinsText = formatCoins(n)
     end
 end
 
-pcall(F.updateCoins)
+pcall(updateCoins)
 
-function F.applyMerchantPacket(pack)
+local function applyMerchantPacket(pack)
     if type(pack) ~= "table" or not pack.Offers then
         return
     end
@@ -165,14 +164,14 @@ pcall(function()
                     or (type(b) == "table" and b.Offers and b)
                     or (type(c) == "table" and c.Offers and c)
                 if pack then
-                    F.applyMerchantPacket(pack)
+                    applyMerchantPacket(pack)
                 end
             end)
         end)
     end
 end)
 
-function F.getHRP()
+local function getHRP()
     local char = LP.Character
     local t = tick()
     while (not char or not char:FindFirstChild("HumanoidRootPart")) and tick() - t < 20 do
@@ -182,9 +181,9 @@ function F.getHRP()
     return char and char:FindFirstChild("HumanoidRootPart")
 end
 
-function F.smoothTP(cf, steps)
+local function smoothTP(cf, steps)
     steps = steps or 22
-    local hrp = F.getHRP()
+    local hrp = getHRP()
     if not hrp then
         return
     end
@@ -201,7 +200,7 @@ function F.smoothTP(cf, steps)
     end
 end
 
-function F.tapIdleKey()
+local function tapIdleKey()
     pcall(function()
         local vim = game:GetService("VirtualInputManager")
         vim:SendKeyEvent(true, Enum.KeyCode.LeftShift, false, game)
@@ -210,12 +209,12 @@ function F.tapIdleKey()
     end)
 end
 
-function F.antiAFK()
+local function antiAFK()
     pcall(function()
         VirtualUser:CaptureController()
         VirtualUser:ClickButton2(Vector2.new())
     end)
-    pcall(F.tapIdleKey)
+    pcall(tapIdleKey)
     pcall(function()
         local char = LP.Character
         local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -229,7 +228,7 @@ function F.antiAFK()
     end)
 end
 
-function F.bindIdle()
+local function bindIdle()
     if idledConn then
         pcall(function()
             idledConn:Disconnect()
@@ -242,19 +241,19 @@ function F.bindIdle()
                 VirtualUser:CaptureController()
                 VirtualUser:ClickButton2(Vector2.new())
             end)
-            pcall(F.tapIdleKey)
+            pcall(tapIdleKey)
         end)
     end)
 end
 
-function F.startAntiAFK()
-    F.bindIdle()
+local function startAntiAFK()
+    bindIdle()
     pcall(function()
         LP.CharacterAdded:Connect(function()
             if afkEnabled then
                 task.wait(1)
-                F.bindIdle()
-                pcall(F.antiAFK)
+                bindIdle()
+                pcall(antiAFK)
             end
         end)
     end)
@@ -265,13 +264,13 @@ function F.startAntiAFK()
     end
     afkThread = task.spawn(function()
         while afkEnabled do
-            pcall(F.antiAFK)
+            pcall(antiAFK)
             task.wait(12)
         end
     end)
 end
 
-function F.stopAntiAFK()
+local function stopAntiAFK()
     if idledConn then
         pcall(function()
             idledConn:Disconnect()
@@ -286,7 +285,7 @@ function F.stopAntiAFK()
     end
 end
 
-function F.invokeNet(name)
+local function invokeNet(name)
     if not Network then
         return
     end
@@ -303,7 +302,7 @@ function F.invokeNet(name)
     end
 end
 
-function F.getRngChannel()
+local function getRngChannel()
     if not Network or not Network.Channel then
         return nil
     end
@@ -315,8 +314,8 @@ function F.getRngChannel()
     end
 end
 
-function F.rngFire(a, b)
-    local ch = F.getRngChannel()
+local function rngFire(a, b)
+    local ch = getRngChannel()
     pcall(function()
         if ch then
             ch:FireServer(a, b)
@@ -335,7 +334,7 @@ local BOARD_NAMES = {
     LuckMultiplier = true,
 }
 
-function F.findIncrementalBoard()
+local function findIncrementalBoard()
     local cached
     local ok, inst = pcall(function()
         return workspace._THINGS.Minigames.ServerOwned.RNGEvent.Interact.Boards.IncrementalBoard
@@ -360,8 +359,8 @@ function F.findIncrementalBoard()
     return cached
 end
 
-function F.getBoardContent()
-    local board = F.findIncrementalBoard()
+local function getBoardContent()
+    local board = findIncrementalBoard()
     if not board then
         return nil
     end
@@ -386,19 +385,19 @@ function F.getBoardContent()
     return content
 end
 
-function F.waitBoard(timeout)
+local function waitBoard(timeout)
     local t = tick()
     while tick() - t < (timeout or 8) do
-        local c = F.getBoardContent()
+        local c = getBoardContent()
         if c then
             return true
         end
         task.wait(0.2)
     end
-    return F.getBoardContent() ~= nil
+    return getBoardContent() ~= nil
 end
 
-function F.fireBtn(btn)
+local function fireBtn(btn)
     if not btn then
         return
     end
@@ -428,11 +427,11 @@ function F.fireBtn(btn)
     end)
 end
 
-function F.clickGui(obj)
+local function clickGui(obj)
     if not obj then
         return
     end
-    F.fireBtn(obj)
+    fireBtn(obj)
     pcall(function()
         local pos = obj.AbsolutePosition
         local size = obj.AbsoluteSize
@@ -445,13 +444,13 @@ function F.clickGui(obj)
         pcall(function()
             inset = game:GetService("GuiService"):GetGuiInset()
         end)
-        F.clickScreen(cx, cy)
-        F.clickScreen(cx + inset.X, cy + inset.Y)
-        F.clickScreen(cx, cy + inset.Y)
+        clickScreen(cx, cy)
+        clickScreen(cx + inset.X, cy + inset.Y)
+        clickScreen(cx, cy + inset.Y)
     end)
 end
 
-function F.getMainGui()
+local function getMainGui()
     local ok, guiMod = pcall(function()
         return require(ReplicatedStorage.Library.Client.GUI)
     end)
@@ -466,8 +465,8 @@ function F.getMainGui()
     return LP.PlayerGui:FindFirstChild("Main")
 end
 
-function F.getRollingFrame()
-    local main = F.getMainGui()
+local function getRollingFrame()
+    local main = getMainGui()
     if main then
         local r = main:FindFirstChild("Rolling")
         if r then
@@ -485,13 +484,13 @@ function F.getRollingFrame()
     return found
 end
 
-function F.rollGuiReady()
-    return F.getRollingFrame() ~= nil
+local function rollGuiReady()
+    return getRollingFrame() ~= nil
 end
 
-function F.collectRollBlob()
+local function collectRollBlob()
     local blob = ""
-    local rolling = F.getRollingFrame()
+    local rolling = getRollingFrame()
     if not rolling then
         return blob
     end
@@ -507,8 +506,8 @@ end
 
 local lastDiceCf, lastDiceMove = nil, 0
 
-function F.diceMoving()
-    local rolling = F.getRollingFrame()
+local function diceMoving()
+    local rolling = getRollingFrame()
     if not rolling then
         return false
     end
@@ -534,18 +533,18 @@ function F.diceMoving()
     return moved or (tick() - lastDiceMove < 1.2)
 end
 
-function F.isDiceBusy()
-    local blob = F.collectRollBlob()
+local function isDiceBusy()
+    local blob = collectRollBlob()
     if blob:find("rolling", 1, true) or blob:find("hatching", 1, true) or blob:find("revealing", 1, true) then
         return true
     end
     if blob:find("auto on", 1, true) or blob:find("stop auto", 1, true) then
         return true
     end
-    if F.diceMoving() then
+    if diceMoving() then
         return true
     end
-    local ch = F.getRngChannel()
+    local ch = getRngChannel()
     local busy = false
     pcall(function()
         if ch and ch.HasRolling then
@@ -555,13 +554,13 @@ function F.isDiceBusy()
     return busy
 end
 
-function F.pressHide()
-    local rolling = F.getRollingFrame()
+local function pressHide()
+    local rolling = getRollingFrame()
     if not rolling then
         return
     end
     pcall(function()
-        F.fireBtn(rolling.Action.Hide.Button)
+        fireBtn(rolling.Action.Hide.Button)
     end)
     pcall(function()
         for _, d in ipairs(rolling:GetDescendants()) do
@@ -572,22 +571,22 @@ function F.pressHide()
                     tx = tx .. " " .. string.lower(title.Text or "")
                 end
                 if tx:find("hide", 1, true) and d:IsA("GuiButton") then
-                    F.fireBtn(d)
+                    fireBtn(d)
                 elseif tx:find("hide", 1, true) and d.Parent and d.Parent:IsA("GuiButton") then
-                    F.fireBtn(d.Parent)
+                    fireBtn(d.Parent)
                 end
             end
         end
     end)
 end
 
-function F.pressAutoBtn()
-    local rolling = F.getRollingFrame()
+local function pressAutoBtn()
+    local rolling = getRollingFrame()
     if not rolling then
         return
     end
     pcall(function()
-        F.fireBtn(rolling.Action.Auto.Button)
+        fireBtn(rolling.Action.Auto.Button)
     end)
     pcall(function()
         for _, d in ipairs(rolling:GetDescendants()) do
@@ -598,29 +597,29 @@ function F.pressAutoBtn()
                     tx = tx .. " " .. string.lower(title.Text or "")
                 end
                 if tx:find("auto", 1, true) and not tx:find("hide", 1, true) then
-                    F.fireBtn(d)
+                    fireBtn(d)
                 end
             end
         end
     end)
 end
 
-function F.kickAutoRoll()
-    F.rngFire("SetAutoRolling", true)
-    if not F.rollGuiReady() then
+local function kickAutoRoll()
+    rngFire("SetAutoRolling", true)
+    if not rollGuiReady() then
         return
     end
-    if F.isDiceBusy() then
-        F.pressHide()
+    if isDiceBusy() then
+        pressHide()
         return
     end
-    F.pressAutoBtn()
+    pressAutoBtn()
     task.wait(0.25)
-    F.rngFire("SetAutoRolling", true)
-    F.pressHide()
+    rngFire("SetAutoRolling", true)
+    pressHide()
 end
 
-function F.stopAutoRoll()
+local function stopAutoRoll()
     autoRollOn = false
     if rollThread then
         pcall(function()
@@ -628,17 +627,17 @@ function F.stopAutoRoll()
         end)
         rollThread = nil
     end
-    F.rngFire("SetAutoRolling", false)
+    rngFire("SetAutoRolling", false)
 end
 
-function F.enableAutoRoll()
+local function enableAutoRoll()
     if not autoRollOn then
         return
     end
-    F.kickAutoRoll()
+    kickAutoRoll()
 end
 
-function F.startRollWatch()
+local function startRollWatch()
     if rollThread then
         pcall(function()
             task.cancel(rollThread)
@@ -648,13 +647,13 @@ function F.startRollWatch()
     rollThread = task.spawn(function()
         local idleFor = 0
         while autoRollOn do
-            F.rngFire("SetAutoRolling", true)
-            if F.isDiceBusy() then
+            rngFire("SetAutoRolling", true)
+            if isDiceBusy() then
                 idleFor = 0
             else
                 idleFor = idleFor + 0.7
                 if idleFor >= 1.4 then
-                    F.kickAutoRoll()
+                    kickAutoRoll()
                     idleFor = 0
                 end
             end
@@ -663,21 +662,21 @@ function F.startRollWatch()
     end)
 end
 
-function F.recoverAutoRoll()
+local function recoverAutoRoll()
     if not autoRollOn then
         return
     end
-    F.startRollWatch()
+    startRollWatch()
     task.spawn(function()
         local t = tick()
         while autoRollOn and tick() - t < 6 do
-            F.rngFire("SetAutoRolling", true)
-            if F.isDiceBusy() then
-                F.pressHide()
+            rngFire("SetAutoRolling", true)
+            if isDiceBusy() then
+                pressHide()
                 return
             end
-            if F.rollGuiReady() then
-                F.kickAutoRoll()
+            if rollGuiReady() then
+                kickAutoRoll()
                 return
             end
             task.wait(0.3)
@@ -685,7 +684,7 @@ function F.recoverAutoRoll()
     end)
 end
 
-function F.parseAmount(str)
+local function parseAmount(str)
     if not str then
         return nil
     end
@@ -703,7 +702,7 @@ function F.parseAmount(str)
     return num
 end
 
-function F.parseLevelPair(text)
+local function parseLevelPair(text)
     if not text then
         return nil, nil
     end
@@ -714,8 +713,8 @@ function F.parseLevelPair(text)
     end
 end
 
-function F.findUpgradeFrame(name)
-    local content = F.getBoardContent()
+local function findUpgradeFrame(name)
+    local content = getBoardContent()
     if not content then
         return nil
     end
@@ -754,16 +753,16 @@ function F.findUpgradeFrame(name)
     end
 end
 
-function F.getUpgradeLevel(name)
+local function getUpgradeLevel(name)
     local cur, maxLvl = 0, 1
     pcall(function()
-        local frame = F.findUpgradeFrame(name)
+        local frame = findUpgradeFrame(name)
         if not frame then
             return
         end
         local bestA, bestB
         local function consider(text)
-            local a, b = F.parseLevelPair(text)
+            local a, b = parseLevelPair(text)
             if a and b and b >= 10 then
                 if not bestB or b > bestB then
                     bestA, bestB = a, b
@@ -785,10 +784,10 @@ function F.getUpgradeLevel(name)
     return cur, maxLvl
 end
 
-function F.allUpgradesMaxed()
+local function allUpgradesMaxed()
     local seen = 0
     for _, name in ipairs({"BreakablesIncremental", "PixelCoinsMultiplier", "LuckMultiplier"}) do
-        local cur, maxLvl = F.getUpgradeLevel(name)
+        local cur, maxLvl = getUpgradeLevel(name)
         if maxLvl <= 1 then
             return false
         end
@@ -800,14 +799,14 @@ function F.allUpgradesMaxed()
     return seen == 3
 end
 
-function F.upgradesReset()
-    local b = F.getUpgradeLevel("BreakablesIncremental")
-    local p = F.getUpgradeLevel("PixelCoinsMultiplier")
-    local l = F.getUpgradeLevel("LuckMultiplier")
+local function upgradesReset()
+    local b = getUpgradeLevel("BreakablesIncremental")
+    local p = getUpgradeLevel("PixelCoinsMultiplier")
+    local l = getUpgradeLevel("LuckMultiplier")
     return b < 20 and p < 50 and l < 20
 end
 
-function F.buyRemote(name, n)
+local function buyRemote(name, n)
     if not Network then
         return
     end
@@ -820,9 +819,9 @@ function F.buyRemote(name, n)
     end)
 end
 
-function F.buyOne(name)
+local function buyOne(name)
     local n = 50
-    local frame = F.findUpgradeFrame(name)
+    local frame = findUpgradeFrame(name)
     if frame then
         local buyMaxBtn = frame:FindFirstChild("Buttons") and frame.Buttons:FindFirstChild("BuyMax") and frame.Buttons.BuyMax:FindFirstChild("Button")
         local title = buyMaxBtn and buyMaxBtn:FindFirstChild("Title")
@@ -832,38 +831,38 @@ function F.buyOne(name)
         if n < 1 then
             n = 1
         end
-        F.buyRemote(name, n)
+        buyRemote(name, n)
         if buyMaxBtn then
-            F.fireBtn(buyMaxBtn)
+            fireBtn(buyMaxBtn)
         end
         local buyBtn = frame:FindFirstChild("Buttons") and frame.Buttons:FindFirstChild("Buy") and frame.Buttons.Buy:FindFirstChild("Button")
         if buyBtn then
-            F.fireBtn(buyBtn)
+            fireBtn(buyBtn)
         end
         return
     end
-    F.buyRemote(name, n)
+    buyRemote(name, n)
 end
 
-function F.buyAllOnce()
-    local b, bm = F.getUpgradeLevel("BreakablesIncremental")
-    local p, pm = F.getUpgradeLevel("PixelCoinsMultiplier")
-    local l, lm = F.getUpgradeLevel("LuckMultiplier")
+local function buyAllOnce()
+    local b, bm = getUpgradeLevel("BreakablesIncremental")
+    local p, pm = getUpgradeLevel("PixelCoinsMultiplier")
+    local l, lm = getUpgradeLevel("LuckMultiplier")
     if b < bm or p < pm then
         if b < bm then
-            F.buyOne("BreakablesIncremental")
+            buyOne("BreakablesIncremental")
         end
         if p < pm then
-            F.buyOne("PixelCoinsMultiplier")
+            buyOne("PixelCoinsMultiplier")
         end
         return
     end
     if l < lm then
-        F.buyOne("LuckMultiplier")
+        buyOne("LuckMultiplier")
     end
 end
 
-function F.rebirthGuiOpen()
+local function rebirthGuiOpen()
     local gui = LP.PlayerGui:FindFirstChild("RNGRebirth")
     if not gui or gui.Enabled == false then
         return nil
@@ -871,7 +870,7 @@ function F.rebirthGuiOpen()
     return gui
 end
 
-function F.considerRebirthTotal(n)
+local function considerRebirthTotal(n)
     n = tonumber(n)
     if not n or n < 0 or n > 1e12 then
         return
@@ -881,7 +880,7 @@ function F.considerRebirthTotal(n)
     end
 end
 
-function F.readRebirthsFromCurrency()
+local function readRebirthsFromCurrency()
     if not Currency or not Currency.Get then
         return
     end
@@ -892,12 +891,12 @@ function F.readRebirthsFromCurrency()
             return Currency.Get(name)
         end)
         if ok and type(val) == "number" and val > 0 then
-            F.considerRebirthTotal(val)
+            considerRebirthTotal(val)
         end
     end
 end
 
-function F.readRebirthsFromGui(root, allowBareNumber)
+local function readRebirthsFromGui(root, allowBareNumber)
     if not root then
         return
     end
@@ -907,7 +906,7 @@ function F.readRebirthsFromGui(root, allowBareNumber)
                 local t = obj.Text or ""
                 local raw = t:match("Rebirth!%s*%((.-)%)")
                 if raw then
-                    local num = F.parseAmount(raw)
+                    local num = parseAmount(raw)
                     if num then
                         cachedCostText = raw
                         cachedCostNum = num
@@ -919,12 +918,12 @@ function F.readRebirthsFromGui(root, allowBareNumber)
                 if allowBareNumber and t:match("^[%d,]+$") then
                     local n = tonumber(cleaned)
                     if n and n >= 1 then
-                        F.considerRebirthTotal(n)
+                        considerRebirthTotal(n)
                     end
                 elseif low:find("rebirth", 1, true) then
                     local n = tonumber(cleaned:match("(%d+)"))
                     if n and n >= 1 then
-                        F.considerRebirthTotal(n)
+                        considerRebirthTotal(n)
                     end
                 end
             end
@@ -932,11 +931,11 @@ function F.readRebirthsFromGui(root, allowBareNumber)
     end)
 end
 
-function F.updateRebirthCost()
-    F.readRebirthsFromCurrency()
-    local gui = F.rebirthGuiOpen() or (LP.PlayerGui and LP.PlayerGui:FindFirstChild("RNGRebirth"))
+local function updateRebirthCost()
+    readRebirthsFromCurrency()
+    local gui = rebirthGuiOpen() or (LP.PlayerGui and LP.PlayerGui:FindFirstChild("RNGRebirth"))
     if gui then
-        F.readRebirthsFromGui(gui, true)
+        readRebirthsFromGui(gui, true)
     end
     pcall(function()
         local pg = LP:FindFirstChild("PlayerGui")
@@ -946,13 +945,13 @@ function F.updateRebirthCost()
         for _, name in ipairs({"Main", "Rebirths", "HUD", "RNGRebirth"}) do
             local g = pg:FindFirstChild(name)
             if g then
-                F.readRebirthsFromGui(g, name == "RNGRebirth" or name == "Rebirths")
+                readRebirthsFromGui(g, name == "RNGRebirth" or name == "Rebirths")
             end
         end
     end)
 end
 
-function F.updateRate()
+local function updateRate()
     if not cachedCoinsNum then
         return
     end
@@ -972,24 +971,24 @@ function F.updateRate()
     end
 end
 
-function F.refreshEtaAvg()
+local function refreshEtaAvg()
     local maxed = false
     pcall(function()
-        maxed = F.allUpgradesMaxed()
+        maxed = allUpgradesMaxed()
     end)
     if not maxed or not costFresh or not cachedCostNum or not cachedCoinsNum then
         etaText = "-"
     elseif cachedCoinsNum >= cachedCostNum then
         etaText = "Ready"
     elseif coinRate > 0 then
-        etaText = F.formatTime((cachedCostNum - cachedCoinsNum) / coinRate)
+        etaText = formatTime((cachedCostNum - cachedCoinsNum) / coinRate)
     else
         etaText = "-"
     end
     if sessionRebirths <= 0 then
-        avgText = F.formatTime(tick() - cycleStart)
+        avgText = formatTime(tick() - cycleStart)
     else
-        avgText = F.formatTime(totalCycleTime / sessionRebirths)
+        avgText = formatTime(totalCycleTime / sessionRebirths)
     end
     if not merchantOn then
         merchantText = "Off"
@@ -1000,31 +999,31 @@ function F.refreshEtaAvg()
         if left <= 0 then
             merchantText = "Now"
         else
-            merchantText = F.formatTime(left)
+            merchantText = formatTime(left)
         end
     end
 end
 
-function F.canAfford()
-    F.updateCoins()
+local function canAfford()
+    updateCoins()
     return costFresh and cachedCostNum ~= nil and cachedCoinsNum ~= nil and cachedCoinsNum >= cachedCostNum
 end
 
-function F.waitRebirthGui(timeout)
+local function waitRebirthGui(timeout)
     local t = tick()
     while tick() - t < (timeout or 8) do
-        local gui = F.rebirthGuiOpen()
+        local gui = rebirthGuiOpen()
         if gui then
-            F.updateRebirthCost()
+            updateRebirthCost()
             return gui
         end
         task.wait(0.15)
     end
-    return F.rebirthGuiOpen()
+    return rebirthGuiOpen()
 end
 
-function F.pressRebirth(gui)
-    gui = gui or F.rebirthGuiOpen()
+local function pressRebirth(gui)
+    gui = gui or rebirthGuiOpen()
     pcall(function()
         Network.InvokeServer("RNGRebirth")
     end)
@@ -1038,32 +1037,32 @@ function F.pressRebirth(gui)
         return
     end
     pcall(function()
-        F.clickGui(gui.Frame.Content.Rebirth.Button)
+        clickGui(gui.Frame.Content.Rebirth.Button)
     end)
     for _, obj in ipairs(gui:GetDescendants()) do
         if obj:IsA("ImageButton") or obj:IsA("TextButton") or obj:IsA("GuiButton") then
             local title = obj:FindFirstChild("Title", true)
             local tx = string.lower(((title and title.Text) or obj.Text or obj.Name or ""))
             if tx:find("rebirth") then
-                F.clickGui(obj)
+                clickGui(obj)
             end
         elseif obj:IsA("TextLabel") then
             local tx = string.lower(obj.Text or "")
             if tx:find("rebirth!") and obj.Parent and obj.Parent:IsA("GuiButton") then
-                F.clickGui(obj.Parent)
+                clickGui(obj.Parent)
             end
         end
     end
 end
 
-function F.merchantGui()
+local function merchantGui()
     local gui = LP.PlayerGui:FindFirstChild("Merchant")
     if gui and gui.Enabled ~= false then
         return gui
     end
 end
 
-function F.parseRestockFromBlob(blob)
+local function parseRestockFromBlob(blob)
     if not blob then
         return nil
     end
@@ -1086,8 +1085,8 @@ function F.parseRestockFromBlob(blob)
     end
 end
 
-function F.captureRestock(gui)
-    gui = gui or F.merchantGui()
+local function captureRestock(gui)
+    gui = gui or merchantGui()
     if not gui then
         return
     end
@@ -1097,13 +1096,13 @@ function F.captureRestock(gui)
             table.insert(parts, obj.Text or "")
         end
     end
-    local sec = F.parseRestockFromBlob(table.concat(parts, " "))
+    local sec = parseRestockFromBlob(table.concat(parts, " "))
     if sec then
         restockAt = tick() + math.max(sec, 3)
     end
 end
 
-function F.clickScreen(x, y)
+local function clickScreen(x, y)
     pcall(function()
         if mousemoveabs then
             mousemoveabs(x, y)
@@ -1122,19 +1121,19 @@ function F.clickScreen(x, y)
     end)
 end
 
-function F.fireMerchantBtn(btn)
-    F.clickGui(btn)
+local function fireMerchantBtn(btn)
+    clickGui(btn)
     local off
     pcall(function()
         local name = btn:GetFullName()
         local slot = tonumber(name:match("Offer_(%d+)"))
         if slot then
-            F.buyOfferRemote(slot)
+            buyOfferRemote(slot)
         end
     end)
 end
 
-function F.readOfferStock(offer)
+local function readOfferStock(offer)
     if not offer then
         return 0
     end
@@ -1149,7 +1148,7 @@ function F.readOfferStock(offer)
     return 0
 end
 
-function F.readOffers(gui)
+local function readOffers(gui)
     local rows = {}
     if not gui then
         return rows
@@ -1171,33 +1170,33 @@ function F.readOffers(gui)
             rows[i] = {
                 offer = offer,
                 btn = btn,
-                stock = F.readOfferStock(offer)
+                stock = readOfferStock(offer)
             }
         end
     end
     return rows
 end
 
-function F.waitStockDrop(offer, before, timeout)
+local function waitStockDrop(offer, before, timeout)
     local t = tick()
     while tick() - t < (timeout or 0.55) do
-        local now = F.readOfferStock(offer)
+        local now = readOfferStock(offer)
         if now < before then
             return true, now
         end
         task.wait(0.04)
     end
-    return false, F.readOfferStock(offer)
+    return false, readOfferStock(offer)
 end
 
-function F.slotStock(i)
+local function slotStock(i)
     if merchantOffers[i] then
         return merchantOffers[i].stock
     end
     return -1
 end
 
-function F.totalCachedStock()
+local function totalCachedStock()
     local n = 0
     local any = false
     for i = 1, 3 do
@@ -1212,7 +1211,7 @@ function F.totalCachedStock()
     return -1
 end
 
-function F.buyOfferRemote(i)
+local function buyOfferRemote(i)
     local off = merchantOffers[i]
     local key = off and off.key or ("respect_tier_" .. i)
     local kind = merchantKind or "DicesMerchant"
@@ -1235,10 +1234,10 @@ function F.buyOfferRemote(i)
     end)
 end
 
-function F.waitCachedStockDrop(i, before, timeout)
+local function waitCachedStockDrop(i, before, timeout)
     local t = tick()
     while tick() - t < (timeout or 0.7) do
-        local now = F.slotStock(i)
+        local now = slotStock(i)
         if now >= 0 and now < before then
             return true
         end
@@ -1247,8 +1246,8 @@ function F.waitCachedStockDrop(i, before, timeout)
     return false
 end
 
-function F.currentStock(i, rows)
-    local s = F.slotStock(i)
+local function currentStock(i, rows)
+    local s = slotStock(i)
     if s >= 0 then
         return s
     end
@@ -1258,7 +1257,7 @@ function F.currentStock(i, rows)
     return 0
 end
 
-function F.offerBlockedText(offer)
+local function offerBlockedText(offer)
     if not offer then
         return false
     end
@@ -1273,9 +1272,9 @@ function F.offerBlockedText(offer)
     return false
 end
 
-function F.canBuySlot(i, rows)
-    F.updateCoins()
-    local stock = F.currentStock(i, rows)
+local function canBuySlot(i, rows)
+    updateCoins()
+    local stock = currentStock(i, rows)
     if stock <= 0 then
         return false
     end
@@ -1286,48 +1285,48 @@ function F.canBuySlot(i, rows)
     if off and off.price and cachedCoinsNum and off.price > cachedCoinsNum then
         return false
     end
-    if rows and rows[i] and F.offerBlockedText(rows[i].offer) then
+    if rows and rows[i] and offerBlockedText(rows[i].offer) then
         return false
     end
     return true
 end
 
-function F.anyBuyable(rows)
+local function anyBuyable(rows)
     for i = 1, 3 do
-        if F.canBuySlot(i, rows) then
+        if canBuySlot(i, rows) then
             return true
         end
     end
     return false
 end
 
-function F.buyMerchantOffers(gui)
+local function buyMerchantOffers(gui)
     local started = tick()
     for i = 1, 3 do
         local fails = 0
         while tick() - started < 18 and fails < 4 do
-            gui = F.merchantGui() or gui
-            local rows = F.readOffers(gui)
-            if not F.canBuySlot(i, rows) then
+            gui = merchantGui() or gui
+            local rows = readOffers(gui)
+            if not canBuySlot(i, rows) then
                 break
             end
-            local before = F.currentStock(i, rows)
+            local before = currentStock(i, rows)
             local left = 0
             for s = 1, 3 do
-                if F.canBuySlot(s, rows) then
-                    left = left + F.currentStock(s, rows)
+                if canBuySlot(s, rows) then
+                    left = left + currentStock(s, rows)
                 end
             end
-            F.setStatus("Buying dice " .. tostring(left))
+            setStatus("Buying dice " .. tostring(left))
             if rows[i] and rows[i].btn then
-                F.fireMerchantBtn(rows[i].btn)
+                fireMerchantBtn(rows[i].btn)
             else
                 fails = fails + 1
                 task.wait(0.2)
             end
-            local dropped = F.waitCachedStockDrop(i, before, 0.55)
+            local dropped = waitCachedStockDrop(i, before, 0.55)
             if not dropped and rows[i] and rows[i].offer then
-                dropped = F.waitStockDrop(rows[i].offer, before, 0.35)
+                dropped = waitStockDrop(rows[i].offer, before, 0.35)
             end
             if dropped then
                 fails = 0
@@ -1339,52 +1338,52 @@ function F.buyMerchantOffers(gui)
     end
 end
 
-function F.waitMerchantGui(timeout)
+local function waitMerchantGui(timeout)
     local t = tick()
     while tick() - t < (timeout or 7) do
-        local gui = F.merchantGui()
+        local gui = merchantGui()
         if gui then
             return gui
         end
         task.wait(0.15)
     end
-    return F.merchantGui()
+    return merchantGui()
 end
 
-function F.visitMerchant()
+local function visitMerchant()
     if not merchantOn then
         return
     end
     merchantBusy = true
-    F.setStatus("Going Merchant")
+    setStatus("Going Merchant")
     if not eventEntered then
-        F.invokeNet("RNGEvent")
+        invokeNet("RNGEvent")
         task.wait(2.2)
         eventEntered = true
     end
-    F.smoothTP(MERCHANT_NEAR, 18)
+    smoothTP(MERCHANT_NEAR, 18)
     task.wait(0.6)
-    F.smoothTP(MERCHANT_CF, 22)
+    smoothTP(MERCHANT_CF, 22)
     task.wait(1.1)
-    local gui = F.waitMerchantGui(7)
+    local gui = waitMerchantGui(7)
     if gui then
-        F.captureRestock(gui)
-        local rows = F.readOffers(gui)
-        if F.anyBuyable(rows) then
-            F.setStatus("Buying dice")
-            F.buyMerchantOffers(gui)
+        captureRestock(gui)
+        local rows = readOffers(gui)
+        if anyBuyable(rows) then
+            setStatus("Buying dice")
+            buyMerchantOffers(gui)
             task.wait(0.25)
         else
-            F.setStatus("Merchant empty")
+            setStatus("Merchant empty")
         end
-        F.captureRestock(gui)
+        captureRestock(gui)
         if running then
-            F.setStatus("Merchant done")
+            setStatus("Merchant done")
         else
-            F.setStatus("Merchant done - turn on Full Cycle")
+            setStatus("Merchant done - turn on Full Cycle")
         end
     else
-        F.setStatus("Merchant GUI missing")
+        setStatus("Merchant GUI missing")
         if not restockAt then
             restockAt = tick() + 300
         end
@@ -1396,7 +1395,7 @@ function F.visitMerchant()
     merchantBusy = false
 end
 
-function F.merchantDue()
+local function merchantDue()
     if not merchantOn or merchantBusy then
         return false
     end
@@ -1406,37 +1405,37 @@ function F.merchantDue()
     if tick() - lastMerchantVisit < 25 then
         return false
     end
-    return F.anyBuyable(F.readOffers(F.merchantGui()))
+    return anyBuyable(readOffers(merchantGui()))
 end
 
-function F.enterVoidSlow()
-    F.smoothTP(VOID_NEAR, 20)
+local function enterVoidSlow()
+    smoothTP(VOID_NEAR, 20)
     task.wait(0.8)
-    F.smoothTP(VOID_CF, 28)
+    smoothTP(VOID_CF, 28)
     task.wait(1.2)
-    local hrp = F.getHRP()
+    local hrp = getHRP()
     if hrp then
         hrp.CFrame = VOID_CF
     end
 end
 
-function F.goWinter()
-    F.setStatus("Going Winter")
-    F.invokeNet("RNGWinter")
+local function goWinter()
+    setStatus("Going Winter")
+    invokeNet("RNGWinter")
     task.wait(2.2)
-    F.smoothTP(WINTER_CF)
-    F.waitBoard(8)
+    smoothTP(WINTER_CF)
+    waitBoard(8)
     task.wait(0.6)
 end
 
-function F.goVoidOpenGui()
-    F.invokeNet("RNGVoid")
+local function goVoidOpenGui()
+    invokeNet("RNGVoid")
     task.wait(2.8)
-    F.enterVoidSlow()
-    return F.waitRebirthGui(8)
+    enterVoidSlow()
+    return waitRebirthGui(8)
 end
 
-function F.onRebirthSuccess()
+local function onRebirthSuccess()
     local now = tick()
     totalCycleTime = totalCycleTime + (now - lastRebirthAt)
     lastRebirthAt = now
@@ -1449,96 +1448,96 @@ function F.onRebirthSuccess()
     sampleCoins, sampleTime, coinRate = nil, nil, 0
     task.wait(1.5)
     if autoRollOn then
-        F.startRollWatch()
-        F.recoverAutoRoll()
+        startRollWatch()
+        recoverAutoRoll()
     end
 end
 
-function F.visitVoid()
-    if F.merchantDue() then
+local function visitVoid()
+    if merchantDue() then
         return "merchant"
     end
-    F.setStatus("Traveling to Void")
-    local gui = F.goVoidOpenGui()
+    setStatus("Traveling to Void")
+    local gui = goVoidOpenGui()
     if not gui then
-        F.setStatus("Rebirth menu missing")
-        F.goWinter()
+        setStatus("Rebirth menu missing")
+        goWinter()
         return "no_gui"
     end
     task.wait(1.2)
-    F.updateRebirthCost()
-    F.updateCoins()
-    if not F.canAfford() then
-        F.setStatus("Not enough coins")
-        F.goWinter()
+    updateRebirthCost()
+    updateCoins()
+    if not canAfford() then
+        setStatus("Not enough coins")
+        goWinter()
         return "farm"
     end
     local beforeCoins = cachedCoinsNum
-    F.setStatus("Attempting rebirth")
+    setStatus("Attempting rebirth")
     for _ = 1, 4 do
-        F.pressRebirth(F.rebirthGuiOpen() or gui)
+        pressRebirth(rebirthGuiOpen() or gui)
         local t = tick()
         while tick() - t < 2.5 do
-            if F.upgradesReset() then
-                F.onRebirthSuccess()
-                F.setStatus("Rebirth complete")
+            if upgradesReset() then
+                onRebirthSuccess()
+                setStatus("Rebirth complete")
                 return "success"
             end
-            F.updateCoins()
+            updateCoins()
             if beforeCoins and cachedCoinsNum and cachedCoinsNum < beforeCoins * 0.2 then
-                F.onRebirthSuccess()
-                F.setStatus("Rebirth complete")
+                onRebirthSuccess()
+                setStatus("Rebirth complete")
                 return "success"
             end
             task.wait(0.2)
         end
     end
-    F.setStatus("Rebirth click failed, retry")
-    F.goWinter()
+    setStatus("Rebirth click failed, retry")
+    goWinter()
     return "farm"
 end
 
-function F.farmWinter()
-    local hasBoard = F.waitBoard(6)
+local function farmWinter()
+    local hasBoard = waitBoard(6)
     if not hasBoard then
-        F.setStatus("Winter board missing - remote buy")
+        setStatus("Winter board missing - remote buy")
     end
     local started = tick()
     while running do
-        if F.merchantDue() then
+        if merchantDue() then
             return "need_merchant"
         end
-        F.updateCoins()
-        F.updateRate()
-        if not F.allUpgradesMaxed() then
-            local b, bm = F.getUpgradeLevel("BreakablesIncremental")
-            local p, pm = F.getUpgradeLevel("PixelCoinsMultiplier")
-            local l, lm = F.getUpgradeLevel("LuckMultiplier")
+        updateCoins()
+        updateRate()
+        if not allUpgradesMaxed() then
+            local b, bm = getUpgradeLevel("BreakablesIncremental")
+            local p, pm = getUpgradeLevel("PixelCoinsMultiplier")
+            local l, lm = getUpgradeLevel("LuckMultiplier")
             if not hasBoard then
-                hasBoard = F.waitBoard(1)
-                F.setStatus("Buying upgrades (remote)")
-                F.buyRemote("BreakablesIncremental", 50)
-                F.buyRemote("PixelCoinsMultiplier", 50)
+                hasBoard = waitBoard(1)
+                setStatus("Buying upgrades (remote)")
+                buyRemote("BreakablesIncremental", 50)
+                buyRemote("PixelCoinsMultiplier", 50)
                 if b >= bm and p >= pm then
-                    F.buyRemote("LuckMultiplier", 50)
+                    buyRemote("LuckMultiplier", 50)
                 end
             elseif b < bm or p < pm then
-                F.setStatus(string.format("Coins + Break  %d/%d  %d/%d", b, bm, p, pm))
+                setStatus(string.format("Coins + Break  %d/%d  %d/%d", b, bm, p, pm))
             else
-                F.setStatus(string.format("Luck  %d/%d", l, lm))
+                setStatus(string.format("Luck  %d/%d", l, lm))
             end
-            F.buyAllOnce()
+            buyAllOnce()
         else
-            if F.merchantDue() then
+            if merchantDue() then
                 return "need_merchant"
             end
-            if F.canAfford() then
+            if canAfford() then
                 return "need_void"
             end
             if not costFresh and tick() - started > 12 then
                 return "need_void"
             end
-            F.setStatus("Maxed - farming " .. tostring(cachedCostText))
+            setStatus("Maxed - farming " .. tostring(cachedCostText))
         end
         task.wait(0.4)
     end
@@ -1569,7 +1568,7 @@ local function clickLabel(needle)
                     btn = d.Parent
                 end
                 if btn and btn:IsA("GuiButton") then
-                    F.clickGui(btn)
+                    clickGui(btn)
                     hit = true
                 end
             end
@@ -1650,7 +1649,7 @@ local function invokeRaid(...)
 end
 
 local function enterRaidHub()
-    F.setStatus("Raid hub")
+    setStatus("Raid hub")
     invokeRaid("RaidEvent")
     pcall(function()
         if Network and Network.Channel then
@@ -1675,7 +1674,7 @@ end
 local function startRaidLobby()
     local lvl = readRaidLevel()
     local diff = maxRaidDiff(lvl)
-    F.setStatus("Raid diff " .. tostring(diff))
+    setStatus("Raid diff " .. tostring(diff))
     invokeRaid(1, diff, "Public")
     clickLabel(tostring(diff))
     task.wait(0.25)
@@ -1736,7 +1735,7 @@ local function hitGate(part)
     end
     pcall(function()
         local cf = part.CFrame * CFrame.new(0, 0, 4)
-        F.smoothTP(cf, 10)
+        smoothTP(cf, 10)
     end)
     pcall(function()
         local guid = part:GetAttribute("Id") or part:GetAttribute("UID") or part:GetAttribute("Guid")
@@ -1758,7 +1757,7 @@ local function clearGates()
         end
         local gate, hp = findRaidGate()
         if gate then
-            F.setStatus("Gate " .. tostring(hp))
+            setStatus("Gate " .. tostring(hp))
             hitGate(gate)
             if lastHp == hp then
                 stable = stable + 1
@@ -1768,7 +1767,7 @@ local function clearGates()
             end
             if stable > 8 then
                 pcall(function()
-                    F.smoothTP(gate.CFrame * CFrame.new(0, 2, 0), 6)
+                    smoothTP(gate.CFrame * CFrame.new(0, 2, 0), 6)
                 end)
                 stable = 0
             end
@@ -1808,7 +1807,7 @@ local function hatchEmperor()
     if not hatchAfterRaid then
         return
     end
-    F.setStatus("Hatch egg")
+    setStatus("Hatch egg")
     local amount = 12
     if guiHas("x12") or guiHas("open x12") then
         amount = 12
@@ -1830,15 +1829,15 @@ local function hatchEmperor()
 end
 
 local function leaveRaid()
-    F.setStatus("Leave raid")
+    setStatus("Leave raid")
     clickLabel("spawn")
     invokeRaid("RaidEvent")
     pcall(function()
         for _, d in ipairs(workspace:GetDescendants()) do
             local n = string.lower(d.Name or "")
             if (n:find("portal", 1, true) or n:find("spawn", 1, true)) and d:IsA("BasePart") then
-                if (d.Position - F.getHRP().Position).Magnitude < 180 then
-                    F.smoothTP(d.CFrame + Vector3.new(0, 3, 0), 8)
+                if (d.Position - getHRP().Position).Magnitude < 180 then
+                    smoothTP(d.CFrame + Vector3.new(0, 3, 0), 8)
                     break
                 end
             end
@@ -1859,54 +1858,54 @@ end
     task.wait(1.2)
 end
 
-function F.doFullCycle()
+local function doFullCycle()
     if not eventEntered then
-        F.setStatus("Entering event")
-        F.invokeNet("RNGEvent")
+        setStatus("Entering event")
+        invokeNet("RNGEvent")
         task.wait(2.2)
         eventEntered = true
     end
     if merchantOn then
-        F.visitMerchant()
+        visitMerchant()
     end
-    F.goWinter()
+    goWinter()
     if autoRollOn then
-        F.recoverAutoRoll()
+        recoverAutoRoll()
     end
     while running do
-        local result = F.farmWinter()
+        local result = farmWinter()
         if result == "stop" or not running then
             return
         end
         if result == "need_merchant" then
-            F.visitMerchant()
-            F.goWinter()
+            visitMerchant()
+            goWinter()
             if autoRollOn then
-                F.recoverAutoRoll()
+                recoverAutoRoll()
             end
         elseif result == "need_void" then
-            if F.merchantDue() then
-                F.visitMerchant()
-                F.goWinter()
+            if merchantDue() then
+                visitMerchant()
+                goWinter()
                 if autoRollOn then
-                    F.recoverAutoRoll()
+                    recoverAutoRoll()
                 end
             else
-                local r = F.visitVoid()
+                local r = visitVoid()
                 if r == "merchant" then
-                    F.visitMerchant()
-                    F.goWinter()
+                    visitMerchant()
+                    goWinter()
                     if autoRollOn then
-                        F.recoverAutoRoll()
+                        recoverAutoRoll()
                     end
                 elseif r == "success" then
-                    F.setStatus("Restarting farm")
-                    if F.merchantDue() then
-                        F.visitMerchant()
+                    setStatus("Restarting farm")
+                    if merchantDue() then
+                        visitMerchant()
                     end
-                    F.goWinter()
+                    goWinter()
                     if autoRollOn then
-                        F.recoverAutoRoll()
+                        recoverAutoRoll()
                     end
                 end
             end
@@ -1914,7 +1913,7 @@ function F.doFullCycle()
     end
 end
 
-function F.getHost()
+local function getHost()
     local pg = LP.PlayerGui
     local main = pg:FindFirstChild("Main")
     if main then
@@ -1928,7 +1927,7 @@ function F.getHost()
     return pg
 end
 
-local host = F.getHost()
+local host = getHost()
 pcall(function()
     local old = host:FindFirstChild("OsamaHub")
     if old then
@@ -1950,13 +1949,13 @@ pcall(function()
     end
 end)
 
-function F.corner(p, r)
+local function corner(p, r)
     local c = Instance.new("UICorner")
     c.CornerRadius = UDim.new(0, r or 8)
     c.Parent = p
 end
 
-function F.stroke(p, col, tr)
+local function stroke(p, col, tr)
     local s = Instance.new("UIStroke")
     s.Color = col or LINE
     s.Transparency = tr or 0.4
@@ -1964,7 +1963,7 @@ function F.stroke(p, col, tr)
     s.Parent = p
 end
 
-function F.txt(parent, props)
+local function txt(parent, props)
     local x = Instance.new("TextLabel")
     x.BackgroundTransparency = 1
     x.Font = Enum.Font.GothamMedium
@@ -1986,8 +1985,8 @@ Panel.BackgroundColor3 = BG
 Panel.BorderSizePixel = 0
 Panel.ZIndex = 50
 Panel.Parent = host
-F.corner(Panel, 14)
-F.stroke(Panel, Color3.fromRGB(48, 52, 64), 0.35)
+corner(Panel, 14)
+stroke(Panel, Color3.fromRGB(48, 52, 64), 0.35)
 
 local header = Instance.new("Frame")
 header.Size = UDim2.new(1, -20, 0, 40)
@@ -2001,9 +2000,9 @@ badge.Position = UDim2.new(0, 2, 0.5, -13)
 badge.BackgroundColor3 = Color3.fromRGB(26, 22, 14)
 badge.BorderSizePixel = 0
 badge.Parent = header
-F.corner(badge, 7)
-F.stroke(badge, GOLD, 0.45)
-F.txt(badge, {
+corner(badge, 7)
+stroke(badge, GOLD, 0.45)
+txt(badge, {
     Size = UDim2.new(1, 0, 1, 0),
     Text = "O",
     Font = Enum.Font.GothamBold,
@@ -2011,14 +2010,14 @@ F.txt(badge, {
     TextColor3 = GOLD,
     TextXAlignment = Enum.TextXAlignment.Center
 })
-F.txt(header, {
+txt(header, {
     Size = UDim2.new(1, -50, 0, 16),
     Position = UDim2.new(0, 36, 0, 4),
     Text = "OSAMA HUB",
     Font = Enum.Font.GothamBold,
     TextSize = 14
 })
-F.txt(header, {
+txt(header, {
     Size = UDim2.new(1, -50, 0, 14),
     Position = UDim2.new(0, 36, 0, 20),
     Text = "RNG - Clicker Simulator",
@@ -2033,7 +2032,7 @@ StatusDot.Position = UDim2.new(1, -8, 0, 8)
 StatusDot.BackgroundColor3 = Color3.fromRGB(70, 76, 90)
 StatusDot.BorderSizePixel = 0
 StatusDot.Parent = header
-F.corner(StatusDot, 8)
+corner(StatusDot, 8)
 
 local divider = Instance.new("Frame")
 divider.Size = UDim2.new(1, -20, 0, 1)
@@ -2042,7 +2041,7 @@ divider.BackgroundColor3 = LINE
 divider.BorderSizePixel = 0
 divider.Parent = Panel
 
-function F.makeToggle(text, sub, y)
+local function makeToggle(text, sub, y)
     local btn = Instance.new("TextButton")
     btn.Size = UDim2.new(1, -20, 0, 34)
     btn.Position = UDim2.new(0, 10, 0, y)
@@ -2050,15 +2049,15 @@ function F.makeToggle(text, sub, y)
     btn.AutoButtonColor = false
     btn.Text = ""
     btn.Parent = Panel
-    F.corner(btn, 10)
-    F.txt(btn, {
+    corner(btn, 10)
+    txt(btn, {
         Size = UDim2.new(1, -56, 0, 15),
         Position = UDim2.new(0, 12, 0, 5),
         Text = text,
         Font = Enum.Font.GothamBold,
         TextSize = 12
     })
-    F.txt(btn, {
+    txt(btn, {
         Size = UDim2.new(1, -56, 0, 13),
         Position = UDim2.new(0, 12, 0, 21),
         Text = sub,
@@ -2072,25 +2071,25 @@ function F.makeToggle(text, sub, y)
     pill.Position = UDim2.new(1, -42, 0.5, -9)
     pill.BackgroundColor3 = Color3.fromRGB(34, 38, 48)
     pill.Parent = btn
-    F.corner(pill, 9)
+    corner(pill, 9)
     local knob = Instance.new("Frame")
     knob.Name = "Knob"
     knob.Size = UDim2.new(0, 14, 0, 14)
     knob.Position = UDim2.new(0, 2, 0.5, -7)
     knob.BackgroundColor3 = Color3.fromRGB(210, 214, 224)
     knob.Parent = pill
-    F.corner(knob, 8)
+    corner(knob, 8)
     return btn, pill, knob
 end
 
-local CycleBtn, CyclePill, CycleKnob = F.makeToggle("Auto RNG Rebirth", "Winter + Void", 58)
-local MercBtn, MercPill, MercKnob = F.makeToggle("Dice Merchant", "Buy on restock", 96)
-local ComboBtn, ComboPill, ComboKnob = F.makeToggle("Dice + Auto RNG", "Merchant then rebirth", 134)
-local RollBtn, RollPill, RollKnob = F.makeToggle("Auto Roll", "Keep rolling", 172)
-local AfkBtn, AfkPill, AfkKnob = F.makeToggle("Anti-AFK", "No idle kick", 210)
-local RaidBtn, RaidPill, RaidKnob = F.makeToggle("Auto Raid", "Max diff + hatch", 248)
+local CycleBtn, CyclePill, CycleKnob = makeToggle("Auto RNG Rebirth", "Winter + Void", 58)
+local MercBtn, MercPill, MercKnob = makeToggle("Dice Merchant", "Buy on restock", 96)
+local ComboBtn, ComboPill, ComboKnob = makeToggle("Dice + Auto RNG", "Merchant then rebirth", 134)
+local RollBtn, RollPill, RollKnob = makeToggle("Auto Roll", "Keep rolling", 172)
+local AfkBtn, AfkPill, AfkKnob = makeToggle("Anti-AFK", "No idle kick", 210)
+local RaidBtn, RaidPill, RaidKnob = makeToggle("Auto Raid", "Max diff + hatch", 248)
 
-function F.setToggle(pill, knob, on, onColor)
+local function setToggle(pill, knob, on, onColor)
     pcall(function()
         TweenService:Create(pill, TweenInfo.new(0.16, Enum.EasingStyle.Quad), {
             BackgroundColor3 = on and onColor or Color3.fromRGB(34, 38, 48)
@@ -2107,9 +2106,9 @@ stats.Size = UDim2.new(1, -20, 0, 148)
 stats.Position = UDim2.new(0, 10, 0, 288)
 stats.BackgroundColor3 = CARD
 stats.Parent = Panel
-F.corner(stats, 12)
+corner(stats, 12)
 
-Status = F.txt(stats, {
+Status = txt(stats, {
     Size = UDim2.new(1, -16, 0, 14),
     Position = UDim2.new(0, 10, 0, 8),
     Text = "Idle",
@@ -2125,8 +2124,8 @@ sep.BackgroundColor3 = LINE
 sep.BorderSizePixel = 0
 sep.Parent = stats
 
-function F.row(y, key)
-    F.txt(stats, {
+local function row(y, key)
+    txt(stats, {
         Size = UDim2.new(0.52, 0, 0, 16),
         Position = UDim2.new(0, 10, 0, y),
         Text = key,
@@ -2134,7 +2133,7 @@ function F.row(y, key)
         TextSize = 11,
         TextColor3 = MUTED
     })
-    return F.txt(stats, {
+    return txt(stats, {
         Size = UDim2.new(0.44, 0, 0, 16),
         Position = UDim2.new(0.52, 0, 0, y),
         Text = "-",
@@ -2144,14 +2143,14 @@ function F.row(y, key)
     })
 end
 
-CoinLbl = F.row(32, "COINS")
-CostLbl = F.row(50, "REBIRTH")
-EtaLbl = F.row(68, "ETA")
-AvgLbl = F.row(86, "AVG")
-TotalLbl = F.row(104, "TOTAL")
-SessionLbl = F.row(122, "SESSION")
+CoinLbl = row(32, "COINS")
+CostLbl = row(50, "REBIRTH")
+EtaLbl = row(68, "ETA")
+AvgLbl = row(86, "AVG")
+TotalLbl = row(104, "TOTAL")
+SessionLbl = row(122, "SESSION")
 
-function F.stockLine()
+local function stockLine()
     local bits = {}
     for i = 1, 3 do
         if merchantOffers[i] then
@@ -2172,10 +2171,10 @@ SidePanel.BorderSizePixel = 0
 SidePanel.Visible = false
 SidePanel.ZIndex = 50
 SidePanel.Parent = host
-F.corner(SidePanel, 14)
-F.stroke(SidePanel, Color3.fromRGB(48, 52, 64), 0.35)
+corner(SidePanel, 14)
+stroke(SidePanel, Color3.fromRGB(48, 52, 64), 0.35)
 
-F.txt(SidePanel, {
+txt(SidePanel, {
     Size = UDim2.new(1, -16, 0, 16),
     Position = UDim2.new(0, 10, 0, 8),
     Text = "DICE MERCHANT",
@@ -2184,8 +2183,8 @@ F.txt(SidePanel, {
     TextColor3 = ACCENT4
 })
 
-function F.sideRow(y, key)
-    F.txt(SidePanel, {
+local function sideRow(y, key)
+    txt(SidePanel, {
         Size = UDim2.new(0.48, 0, 0, 16),
         Position = UDim2.new(0, 10, 0, y),
         Text = key,
@@ -2193,7 +2192,7 @@ function F.sideRow(y, key)
         TextSize = 10,
         TextColor3 = MUTED
     })
-    return F.txt(SidePanel, {
+    return txt(SidePanel, {
         Size = UDim2.new(0.46, 0, 0, 16),
         Position = UDim2.new(0.50, 0, 0, y),
         Text = "-",
@@ -2203,20 +2202,20 @@ function F.sideRow(y, key)
     })
 end
 
-SideMerc = F.sideRow(32, "RESTOCK")
-SideStock = F.sideRow(54, "STOCK")
-SideCoins = F.sideRow(76, "COINS")
-SideCost = F.sideRow(98, "REBIRTH")
-SideEta = F.sideRow(120, "ETA")
+SideMerc = sideRow(32, "RESTOCK")
+SideStock = sideRow(54, "STOCK")
+SideCoins = sideRow(76, "COINS")
+SideCost = sideRow(98, "REBIRTH")
+SideEta = sideRow(120, "ETA")
 
-function F.setSideVisible(on)
+local function setSideVisible(on)
     if not SidePanel then
         return
     end
     SidePanel.Visible = on and true or false
 end
 
-F.txt(Panel, {
+txt(Panel, {
     Size = UDim2.new(1, 0, 0, 12),
     Position = UDim2.new(0, 0, 1, -18),
     Text = "Right Shift - osamahub",
@@ -2243,10 +2242,10 @@ Card.BackgroundColor3 = BG
 Card.BorderSizePixel = 0
 Card.ZIndex = 91
 Card.Parent = Warn
-F.corner(Card, 14)
-F.stroke(Card, Color3.fromRGB(48, 52, 64), 0.35)
+corner(Card, 14)
+stroke(Card, Color3.fromRGB(48, 52, 64), 0.35)
 
-F.txt(Card, {
+txt(Card, {
     Size = UDim2.new(1, -24, 0, 22),
     Position = UDim2.new(0, 12, 0, 16),
     Text = "WARNING",
@@ -2257,7 +2256,7 @@ F.txt(Card, {
     ZIndex = 92
 })
 
-F.txt(Card, {
+txt(Card, {
     Size = UDim2.new(1, -32, 0, 72),
     Position = UDim2.new(0, 16, 0, 46),
     Text = "For the script to work properly:\nManually teleport to RNG Dice SPAWN,\nthen turn on Full Cycle.",
@@ -2276,10 +2275,10 @@ TimerPill.BackgroundColor3 = Color3.fromRGB(28, 24, 16)
 TimerPill.BorderSizePixel = 0
 TimerPill.ZIndex = 92
 TimerPill.Parent = Card
-F.corner(TimerPill, 8)
-F.stroke(TimerPill, GOLD, 0.45)
+corner(TimerPill, 8)
+stroke(TimerPill, GOLD, 0.45)
 
-local TimerLbl = F.txt(TimerPill, {
+local TimerLbl = txt(TimerPill, {
     Size = UDim2.new(1, 0, 1, 0),
     Text = "5",
     Font = Enum.Font.GothamBold,
@@ -2301,7 +2300,7 @@ CloseBtn.TextColor3 = MUTED
 CloseBtn.Active = false
 CloseBtn.ZIndex = 92
 CloseBtn.Parent = Card
-F.corner(CloseBtn, 8)
+corner(CloseBtn, 8)
 
 local warnLocked = true
 task.spawn(function()
@@ -2327,7 +2326,7 @@ end)
 
 local open = true
 local tw = TweenInfo.new(0.32, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
-function F.toggleGui()
+local function toggleGui()
     open = not open
     pcall(function()
         TweenService:Create(Panel, tw, {
@@ -2346,7 +2345,7 @@ UserInputService.InputBegan:Connect(function(input, gp)
         return
     end
     if input.KeyCode == Enum.KeyCode.RightShift then
-        F.toggleGui()
+        toggleGui()
     end
 end)
 
@@ -2356,10 +2355,10 @@ RunService.Heartbeat:Connect(function()
         return
     end
     lastUi = tick()
-    pcall(F.updateCoins)
-    pcall(F.updateRebirthCost)
-    pcall(F.updateRate)
-    pcall(F.refreshEtaAvg)
+    pcall(updateCoins)
+    pcall(updateRebirthCost)
+    pcall(updateRate)
+    pcall(refreshEtaAvg)
     pcall(function()
         if Status then
             Status.Text = statusText
@@ -2389,7 +2388,7 @@ RunService.Heartbeat:Connect(function()
             SideMerc.Text = tostring(merchantText)
         end
         if SideStock then
-            SideStock.Text = F.stockLine()
+            SideStock.Text = stockLine()
         end
         if SideCoins then
             SideCoins.Text = tostring(cachedCoinsText)
@@ -2405,7 +2404,7 @@ end)
 
 local cycleThread
 
-function F.stopCycle()
+local function stopCycle()
     running = false
     if cycleThread then
         pcall(function()
@@ -2413,14 +2412,14 @@ function F.stopCycle()
         end)
         cycleThread = nil
     end
-    F.setToggle(CyclePill, CycleKnob, false, ACCENT)
+    setToggle(CyclePill, CycleKnob, false, ACCENT)
     pcall(function()
         StatusDot.BackgroundColor3 = Color3.fromRGB(70, 76, 90)
     end)
-    F.setStatus("Stopped")
+    setStatus("Stopped")
 end
 
-function F.startCycle()
+local function startCycle()
     if cycleThread then
         pcall(function()
             task.cancel(cycleThread)
@@ -2431,41 +2430,41 @@ function F.startCycle()
     cycleStart = tick()
     lastRebirthAt = tick()
     eventEntered = false
-    F.setToggle(CyclePill, CycleKnob, not comboOn, ACCENT)
+    setToggle(CyclePill, CycleKnob, not comboOn, ACCENT)
     pcall(function()
         StatusDot.BackgroundColor3 = ACCENT
     end)
-    F.setStatus("Starting")
+    setStatus("Starting")
     cycleThread = task.spawn(function()
         while running do
-            local ok, err = pcall(F.doFullCycle)
+            local ok, err = pcall(doFullCycle)
             if not running then
                 break
             end
             if not ok then
-                F.setStatus("Retry")
+                setStatus("Retry")
                 print("[osamahub] cycle", err)
                 task.wait(2)
             else
                 task.wait(1)
             end
         end
-        F.setStatus("Stopped")
+        setStatus("Stopped")
     end)
 end
 
-function F.setMerchantMode(on)
+local function setMerchantMode(on)
     merchantOn = on
-    F.setToggle(MercPill, MercKnob, on and not comboOn, ACCENT4)
-    F.setSideVisible(on)
+    setToggle(MercPill, MercKnob, on and not comboOn, ACCENT4)
+    setSideVisible(on)
     if on then
         task.spawn(function()
-            pcall(F.visitMerchant)
+            pcall(visitMerchant)
             if running then
-                pcall(F.goWinter)
+                pcall(goWinter)
                 if autoRollOn then
-                    F.startRollWatch()
-                    F.recoverAutoRoll()
+                    startRollWatch()
+                    recoverAutoRoll()
                 end
             end
         end)
@@ -2475,85 +2474,85 @@ function F.setMerchantMode(on)
     end
 end
 
-function F.setCombo(on)
+local function setCombo(on)
     comboOn = on
-    F.setToggle(ComboPill, ComboKnob, on, GOLD)
+    setToggle(ComboPill, ComboKnob, on, GOLD)
     if on then
-        F.setToggle(CyclePill, CycleKnob, false, ACCENT)
-        F.setToggle(MercPill, MercKnob, false, ACCENT4)
+        setToggle(CyclePill, CycleKnob, false, ACCENT)
+        setToggle(MercPill, MercKnob, false, ACCENT4)
         merchantOn = true
-        F.setSideVisible(true)
-        F.startCycle()
-        F.setToggle(CyclePill, CycleKnob, false, ACCENT)
+        setSideVisible(true)
+        startCycle()
+        setToggle(CyclePill, CycleKnob, false, ACCENT)
     else
         merchantOn = false
-        F.setSideVisible(false)
-        F.stopCycle()
+        setSideVisible(false)
+        stopCycle()
     end
 end
 
 CycleBtn.MouseButton1Click:Connect(function()
     if comboOn then
-        F.setCombo(false)
+        setCombo(false)
     end
     if running then
-        F.stopCycle()
+        stopCycle()
     else
-        F.startCycle()
-        F.setToggle(CyclePill, CycleKnob, true, ACCENT)
+        startCycle()
+        setToggle(CyclePill, CycleKnob, true, ACCENT)
     end
 end)
 
 MercBtn.MouseButton1Click:Connect(function()
     if comboOn then
         comboOn = false
-        F.setToggle(ComboPill, ComboKnob, false, GOLD)
-        F.stopCycle()
+        setToggle(ComboPill, ComboKnob, false, GOLD)
+        stopCycle()
     end
-    F.setMerchantMode(not merchantOn)
+    setMerchantMode(not merchantOn)
 end)
 
 ComboBtn.MouseButton1Click:Connect(function()
-    F.setCombo(not comboOn)
+    setCombo(not comboOn)
 end)
 
 RollBtn.MouseButton1Click:Connect(function()
     autoRollOn = not autoRollOn
-    F.setToggle(RollPill, RollKnob, autoRollOn, ACCENT3)
+    setToggle(RollPill, RollKnob, autoRollOn, ACCENT3)
     if autoRollOn then
-        F.startRollWatch()
-        F.recoverAutoRoll()
+        startRollWatch()
+        recoverAutoRoll()
     else
-        F.stopAutoRoll()
+        stopAutoRoll()
     end
 end)
 
 AfkBtn.MouseButton1Click:Connect(function()
     afkEnabled = not afkEnabled
-    F.setToggle(AfkPill, AfkKnob, afkEnabled, ACCENT2)
+    setToggle(AfkPill, AfkKnob, afkEnabled, ACCENT2)
     if afkEnabled then
-        F.startAntiAFK()
+        startAntiAFK()
     else
-        F.stopAntiAFK()
+        stopAntiAFK()
     end
 end)
 
 RaidBtn.MouseButton1Click:Connect(function()
     raidOn = not raidOn
-    F.setToggle(RaidPill, RaidKnob, raidOn, GOLD)
+    setToggle(RaidPill, RaidKnob, raidOn, GOLD)
     if raidOn then
         raidThread = task.spawn(function()
             while raidOn do
                 local ok, err = pcall(doRaidCycle)
                 if not ok then
-                    F.setStatus("Raid retry")
+                    setStatus("Raid retry")
                     print("[osamahub] raid", err)
                     task.wait(2)
                 else
                     task.wait(1)
                 end
             end
-            F.setStatus("Raid off")
+            setStatus("Raid off")
         end)
     else
         if raidThread then
@@ -2562,11 +2561,11 @@ RaidBtn.MouseButton1Click:Connect(function()
             end)
             raidThread = nil
         end
-        F.setStatus("Raid off")
+        setStatus("Raid off")
     end
 end)
 
 afkEnabled = true
-F.setToggle(AfkPill, AfkKnob, true, ACCENT2)
-F.startAntiAFK()
+setToggle(AfkPill, AfkKnob, true, ACCENT2)
+startAntiAFK()
 print("[osamahub] ready")
