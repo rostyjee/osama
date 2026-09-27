@@ -866,31 +866,85 @@ local function rebirthGuiOpen()
     return gui
 end
 
-local function updateRebirthCost()
-    local gui = rebirthGuiOpen()
-    if not gui then
+local function considerRebirthTotal(n)
+    n = tonumber(n)
+    if not n or n < 0 or n > 1e12 then
         return
     end
-    for _, obj in ipairs(gui:GetDescendants()) do
-        if obj:IsA("TextLabel") or obj:IsA("TextButton") then
-            local t = obj.Text or ""
-            local raw = t:match("Rebirth!%s*%((.-)%)")
-            if raw then
-                local num = parseAmount(raw)
-                if num then
-                    cachedCostText = raw
-                    cachedCostNum = num
-                    costFresh = true
+    if typeof(totalRebirths) ~= "number" or n > totalRebirths then
+        totalRebirths = math.floor(n)
+    end
+end
+
+local function readRebirthsFromCurrency()
+    if not Currency or not Currency.Get then
+        return
+    end
+    for _, name in ipairs({
+        "RngRebirths", "RNGRebirths", "RNG2Rebirths", "Rebirths", "rng rebirths", "RNG rebirths"
+    }) do
+        local ok, val = pcall(function()
+            return Currency.Get(name)
+        end)
+        if ok and type(val) == "number" and val > 0 then
+            considerRebirthTotal(val)
+        end
+    end
+end
+
+local function readRebirthsFromGui(root, allowBareNumber)
+    if not root then
+        return
+    end
+    pcall(function()
+        for _, obj in ipairs(root:GetDescendants()) do
+            if obj:IsA("TextLabel") or obj:IsA("TextButton") then
+                local t = obj.Text or ""
+                local raw = t:match("Rebirth!%s*%((.-)%)")
+                if raw then
+                    local num = parseAmount(raw)
+                    if num then
+                        cachedCostText = raw
+                        cachedCostNum = num
+                        costFresh = true
+                    end
                 end
-            end
-            if t:match("^%d+$") and obj.Visible then
-                local n = tonumber(t)
-                if n and n >= 0 and n < 100000 then
-                    totalRebirths = n
+                local low = string.lower(t .. " " .. obj.Name)
+                local cleaned = t:gsub(",", "")
+                if allowBareNumber and t:match("^[%d,]+$") then
+                    local n = tonumber(cleaned)
+                    if n and n >= 1 then
+                        considerRebirthTotal(n)
+                    end
+                elseif low:find("rebirth", 1, true) then
+                    local n = tonumber(cleaned:match("(%d+)"))
+                    if n and n >= 1 then
+                        considerRebirthTotal(n)
+                    end
                 end
             end
         end
+    end)
+end
+
+local function updateRebirthCost()
+    readRebirthsFromCurrency()
+    local gui = rebirthGuiOpen() or (LP.PlayerGui and LP.PlayerGui:FindFirstChild("RNGRebirth"))
+    if gui then
+        readRebirthsFromGui(gui, true)
     end
+    pcall(function()
+        local pg = LP:FindFirstChild("PlayerGui")
+        if not pg then
+            return
+        end
+        for _, name in ipairs({"Main", "Rebirths", "HUD", "RNGRebirth"}) do
+            local g = pg:FindFirstChild(name)
+            if g then
+                readRebirthsFromGui(g, name == "RNGRebirth" or name == "Rebirths")
+            end
+        end
+    end)
 end
 
 local function updateRate()
