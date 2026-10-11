@@ -261,7 +261,9 @@ local window = Rayfield:CreateWindow({
 	subtitle = "Auto Farm",
 	theme = "ember",
 	sidebarLayout = true,
-	configuration = { autoSave = true, autoLoad = true, fileName = "TapSimAutoClicker" },
+	-- One settings file per account: a fresh account starts with everything off, and
+	-- bots on the same PC don't share (or overwrite) each other's toggles.
+	configuration = { autoSave = true, autoLoad = true, fileName = "TapSimAutoClicker_" .. Players.LocalPlayer.UserId },
 })
 
 STATE.onCleanup(function()
