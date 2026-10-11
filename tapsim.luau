@@ -136,6 +136,7 @@ local breakingNow = false
 -- Most sections live in their own do-block (Luau allows 200 locals per scope);
 -- the few functions handed to getgenv().__TapAC for testing are collected here.
 local exports = {}
+exports.savedSettings = {} -- filled by lean() below
 
 -- STATE is provided by live-reload; fall back to a plain shim when run elsewhere.
 local STATE = STATE or {
@@ -306,6 +307,14 @@ local function lean(group)
 				end
 				local handle = fn(group, props, ...)
 				if method == "CreateGroup" then return lean(handle) end
+				-- Every saved setting and its starting value, for "Reset settings".
+				if type(props) == "table" and props.flag and handle then
+					local default = props.value
+					if default == nil and method == "CreateToggle" then default = false end
+					if default ~= nil then
+						table.insert(exports.savedSettings, { handle = handle, default = default })
+					end
+				end
 				return handle
 			end
 		end,
@@ -433,6 +442,40 @@ settingsLeft:CreateToggle({
 		end)
 	end,
 })
+
+-- Reset settings: every saved toggle, slider and dropdown back to how a fresh account
+-- starts (automations off), which also rewrites this account's settings file. Two clicks
+-- within 5 seconds, so a stray click can't wipe a setup. The button only leaves a
+-- request; the reset runs on the script's own thread.
+do
+	local armedUntil, requested = 0, false
+	local resetButton = settingsLeft:CreateButton({
+		name = "Reset settings",
+		callback = function()
+			if os.clock() <= armedUntil then
+				armedUntil, requested = 0, true
+			else
+				armedUntil = os.clock() + 5
+				notify("Reset settings", "Click again within 5 seconds to turn everything off.")
+			end
+		end,
+	})
+	task.spawn(function()
+		while STATE.alive() and alive do
+			task.wait(0.2)
+			if requested then
+				requested = false
+				local count = 0
+				for _, entry in ipairs(exports.savedSettings) do
+					if pcall(function() entry.handle:Set(entry.default) end) then count += 1 end
+				end
+				activity("Settings", ("Reset %d settings to defaults"):format(count))
+				notify("Reset settings", "Everything is back to defaults (automations off).")
+			end
+		end
+	end)
+	exports.resetButton = resetButton
+end
 
 settingsTab:CreateKeybind({
 	name = "Auto Tap key",
