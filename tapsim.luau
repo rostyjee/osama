@@ -1,4 +1,5 @@
 -- Tap Simulator: Reborn hub (Rayfield Gen2)
+--   Auto Full: plays the whole game by itself (Home card; see the Auto Full block)
 --   Farming:  auto tap, auto rebirth, auto gem upgrades, auto mining
 --   Hatching: auto hatch, hide hatch animation
 --   Utils:    auto claim quests, auto Tap Chests, auto dig site, unlock + teleport to worlds
@@ -88,6 +89,17 @@ local cfg = {
 	autoBuyBackpack = true,
 	priorityOres = {},
 	onlyPriorityOres = false,
+	-- Auto Full (Home) switches features on through this table while it runs; each
+	-- feature checks it next to its own toggle, so your own toggles stay as you set them.
+	full = {
+		on = false,
+		hatchEgg = nil, -- egg Auto Full wants hatched right now (nil = don't hatch)
+		reserve = 0, -- coins nothing may spend: saving up for the next island
+		hatchReserve = 0, -- coins rebirths leave for the next hatch
+		craft = { Golden = {}, Diamond = {}, Rainbow = {} }, -- pet kinds worth crafting up
+		deleteWeak = true,
+		keepMythical = true,
+	},
 }
 local stats = {
 	sent = 0,
@@ -348,6 +360,23 @@ local rebirthStat = bigNumber(homeLeft, "Rebirths")
 local gemsStat = bigNumber(homeLeft, "Gems")
 local homeMiningStat = bigNumber(homeLeft, "Mining coins")
 
+homeRight:CreateSection({ name = "Auto Full" })
+do
+	-- Built here so the card sits at the top of Home; the logic is the Auto Full block
+	-- near the end of the script, which finds these handles in cfg.full.ui. Buttons only
+	-- leave a request: the work runs on Auto Full's own thread.
+	local full = cfg.full
+	full.ui = {}
+	homeRight:CreateToggle({ name = "Auto Full", flag = "AutoFull", callback = function(v) full.on = v end })
+	homeRight:CreateToggle({ name = "Delete weak pets", value = true, flag = "FullDeleteWeak", callback = function(v) full.deleteWeak = v end })
+	homeRight:CreateToggle({ name = "Keep Mythicals", value = true, flag = "FullKeepMythical", callback = function(v) full.keepMythical = v end })
+	full.ui.doing = homeRight:CreateText({ name = "Doing", text = "Off" })
+	full.ui.plan = homeRight:CreateText({ name = "Plan", text = "-" })
+	local row = homeRight:CreateGroup()
+	row:CreateButton({ name = "Preview cleanup", callback = function() full.request = "preview" end })
+	row:CreateButton({ name = "Clean up now", callback = function() full.request = "cleanup" end })
+end
+
 homeRight:CreateSection({ name = "Running" })
 local runningText = homeRight:CreateText({ name = "Automations", text = "-" })
 
@@ -498,7 +527,7 @@ function buyCheapest()
 	if not data then return false end
 	local gems = data.Currencies.Gems or 0
 	for _, entry in ipairs(scanUpgrades(data)) do
-		if isBuyable(entry) and treeSelected(entry.tree) and os.clock() >= (retryAfter[entry.name] or 0) then
+		if isBuyable(entry) and (cfg.full.on or treeSelected(entry.tree)) and os.clock() >= (retryAfter[entry.name] or 0) then
 			if entry.price > gems then return false end -- sorted by price, nothing cheaper left
 			buying = true
 			local ok, res = pcall(function() return UnlockSkill:InvokeServer({ Name = entry.name }) end)
@@ -551,7 +580,7 @@ task.spawn(function()
 	local lastListed = nil
 	while STATE.alive() and alive do
 		task.wait(0.5)
-		if cfg.autoUpgrade then
+		if cfg.autoUpgrade or cfg.full.on then
 			if buyCheapest() then task.wait(0.35) end
 		end
 		local data = getData()
@@ -1215,7 +1244,7 @@ task.spawn(function()
 	local lastListed = nil
 	while STATE.alive() and alive do
 		task.wait(1)
-		if cfg.autoClaimQuests then claimReadyQuests() end
+		if cfg.autoClaimQuests or cfg.full.on then claimReadyQuests() end
 		local data = getData()
 		if data then
 			local text = describeQuests(data)
@@ -1278,7 +1307,7 @@ local function claimChest(id)
 
 	local returnTo = nil
 	if not inReach then
-		if not cfg.chestTeleport or travelLock > 0 then return false end
+		if not (cfg.chestTeleport or cfg.full.on) or travelLock > 0 then return false end
 		travelLock += 1
 		returnTo = character:GetPivot()
 		local spot = front.Position + front.LookVector * (size.Z * 0.5 + 6) + Vector3.new(0, 3, 0)
@@ -1337,7 +1366,7 @@ task.spawn(function()
 		if not data then continue end
 		local states = chestStates(data)
 
-		if cfg.autoChest then
+		if cfg.autoChest or cfg.full.on then
 			for _, chest in ipairs(states) do
 				if chest.unlocked and chest.readyIn <= 0 and os.clock() >= (chestRetryAfter[chest.id] or 0) then
 					claimChest(chest.id)
@@ -1473,7 +1502,7 @@ local function digTrip(available)
 	end
 
 	for n = 1, available do
-		if not cfg.autoDig or not STATE.alive() then break end
+		if not (cfg.autoDig or cfg.full.on) or not STATE.alive() then break end
 		setDigStatus(("Digging %d / %d"):format(n, available))
 		local reply, why = playDig()
 		if not reply then
@@ -1503,7 +1532,7 @@ task.spawn(function()
 
 		if not unlocked.Autumn then
 			setDigStatus("Unlock Autumn to use the dig site")
-		elseif cfg.autoDig and available > 0 and travelLock == 0 then
+		elseif (cfg.autoDig or cfg.full.on) and available > 0 and travelLock == 0 then
 			digTrip(available)
 		elseif available > 0 then
 			setDigStatus(("%d dig%s ready"):format(available, available == 1 and "" or "s"))
@@ -1558,7 +1587,8 @@ end
 local function pickHatchCount(data, egg)
 	local def = LaunchEggConfig[egg]
 	if not def then return nil end
-	local coins = data.Currencies.Coins or 0
+	-- Auto Full may be holding coins for the next island; those aren't for eggs.
+	local coins = (data.Currencies.Coins or 0) - (cfg.full.on and cfg.full.reserve or 0)
 	local canOcto = GamepassPerks.Has(data, "x8Egg") or BoostFormula.HasType(data, "OctoHatch")
 	if canOcto and EggPricing.GetTotal(data, egg, def.Price, 8) <= coins then return 8 end
 	if EggPricing.GetTotal(data, egg, def.Price, 3) <= coins then return 3 end
@@ -1737,6 +1767,7 @@ local function hatchOnce(data, egg)
 		return 0.5
 	end
 	setHatchStatus("Server said: " .. tostring(reply.Error or reply.Reason or "no"))
+	if cfg.full.on and cfg.full.onHatchError then cfg.full.onHatchError(egg, reply) end
 	return 2
 end
 
@@ -1752,8 +1783,13 @@ task.spawn(function()
 				pcall(function() eggDropdown:Refresh(eggOptions(eggs)) end)
 			end
 
-			if cfg.autoHatch and cfg.hatchEgg then
-				pause = hatchOnce(data, cfg.hatchEgg)
+			-- Auto Full picks the egg (or none) itself while it runs.
+			local egg, wanted = cfg.hatchEgg, cfg.autoHatch
+			if cfg.full.on then egg, wanted = cfg.full.hatchEgg, cfg.full.hatchEgg ~= nil end
+			if wanted and egg then
+				pause = hatchOnce(data, egg)
+			elseif cfg.full.on then
+				setHatchStatus("Auto Full: not hatching right now")
 			elseif not cfg.autoHatch then
 				setHatchStatus("Idle")
 			end
@@ -1915,7 +1951,7 @@ task.spawn(function()
 		local island, price = nextLockedIsland()
 		local coins = data and data.Currencies.Coins or 0
 
-		if cfg.autoUnlockWorlds and island and coins >= price and travelLock == 0 then
+		if (cfg.autoUnlockWorlds or cfg.full.on) and island and coins >= price and travelLock == 0 then
 			local unlockedNow = unlockAllWorlds()
 			if #unlockedNow > 0 then notify("Worlds", "Unlocked: " .. table.concat(unlockedNow, ", ")) end
 			island, price = nextLockedIsland()
@@ -1950,6 +1986,7 @@ local CRAFT_GAP = 0.45
 local CRAFTS_PER_TRIP = 30
 local craftUsed = {}
 cfg.machines = {}
+cfg.full.craftUsed = craftUsed -- Auto Full's cleanup never deletes a pet that is mid-craft
 
 local gameCraftHandlers = {}
 for _, conn in ipairs(getconnections(MachineCraftResult.OnClientEvent)) do
@@ -2166,17 +2203,25 @@ local function chanceMachine(spec)
 	local madeStat = card:CreateStat({ name = spec.madeLabel, value = 0 })
 	local function setState(text) state.status = text setStatus(text) end
 
-	local function trip(data)
-		if #state.pets == 0 then setState("Pick which pets to use") return end
-		if not pickBatch(data, config.SourceTier, state.pets, state.count, state.count) then
-			setState(("Waiting for %d spare copies of a chosen pet"):format(state.count))
+	-- The fewest pets per craft that still give 100% (what Auto Full uses).
+	local function sureCount(data)
+		for count = 1, #config.Chances do
+			if chance(data, count) >= 100 then return count end
+		end
+		return #config.Chances
+	end
+
+	local function trip(data, pets, count)
+		if #pets == 0 then setState("Pick which pets to use") return end
+		if not pickBatch(data, config.SourceTier, pets, count, count) then
+			setState(("Waiting for %d spare copies of a chosen pet"):format(count))
 			return
 		end
 		if travelLock > 0 then return end
 		local ok, err = atMachine(function() return machineZone(spec.point, spec.anchor, spec.island) end, function()
 			local crafts = 0
-			local name, ids = pickBatch(getData() or data, config.SourceTier, state.pets, state.count, state.count)
-			while name and crafts < CRAFTS_PER_TRIP and state.auto and STATE.alive() do
+			local name, ids = pickBatch(getData() or data, config.SourceTier, pets, count, count)
+			while name and crafts < CRAFTS_PER_TRIP and (state.auto or cfg.full.on) and STATE.alive() do
 				local pct = math.floor(chance(data, #ids) + 0.5)
 				setState(("Crafting %dx %s (%d%%)"):format(#ids, name, pct))
 				for _, id in ipairs(ids) do craftUsed[id] = true end
@@ -2199,7 +2244,7 @@ local function chanceMachine(spec)
 					end
 				end
 				task.wait(CRAFT_GAP)
-				name, ids = pickBatch(getData() or data, config.SourceTier, state.pets, state.count, state.count)
+				name, ids = pickBatch(getData() or data, config.SourceTier, pets, count, count)
 			end
 		end)
 		if not ok and err ~= "busy" then setState(tostring(err)) end
@@ -2218,7 +2263,14 @@ local function chanceMachine(spec)
 			for id in pairs(craftUsed) do
 				if data.Pets.Owned[id] == nil then craftUsed[id] = nil end
 			end
-			if state.auto then trip(data) else setState("Off") end
+			local fullPets = cfg.full.on and cfg.full.craft[spec.key]
+			if state.auto then
+				trip(data, state.pets, state.count)
+			elseif fullPets and #fullPets > 0 then
+				trip(data, fullPets, sureCount(data))
+			else
+				setState(cfg.full.on and "Auto Full: nothing worth crafting" or "Off")
+			end
 			pcall(function() madeStat:Set(state.made) end)
 		end
 	end)
@@ -2262,6 +2314,18 @@ do
 	local function batchSize()
 		if rainbow.size == 0 then return SHINY.MinPets, #SHINY.Durations end
 		return rainbow.size, rainbow.size
+	end
+
+	-- What to fuse: your own picks, or Auto Full's (always a full batch: seconds
+	-- instead of hours). Returns on, pet kinds, fewest per fuse, most per fuse.
+	local function choice()
+		if rainbow.auto then
+			local need, take = batchSize()
+			return true, rainbow.pets, need, take
+		end
+		local pets = cfg.full.on and cfg.full.craft.Rainbow
+		if pets and #pets > 0 then return true, pets, #SHINY.Durations, #SHINY.Durations end
+		return false, {}, 0, 0
 	end
 
 	local function queueEntries(data)
@@ -2345,9 +2409,9 @@ do
 			end
 			local data = getData()
 			local free = data and (SHINY.MaxQueue - #queueEntries(data)) or 0
-			local need, take = batchSize()
-			while rainbow.auto and free > 0 and STATE.alive() do
-				local name, ids = pickBatch(getData() or data, SHINY.SourceTier, rainbow.pets, need, take)
+			local active, pets, need, take = choice()
+			while active and (rainbow.auto or cfg.full.on) and free > 0 and STATE.alive() do
+				local name, ids = pickBatch(getData() or data, SHINY.SourceTier, pets, need, take)
 				if not name then break end
 				setState(("Starting %dx %s"):format(#ids, name))
 				for _, id in ipairs(ids) do craftUsed[id] = true end
@@ -2381,10 +2445,10 @@ do
 			for _, entry in ipairs(queue) do
 				if entry.endTime <= now then table.insert(ready, entry) end
 			end
-			local need, take = batchSize()
-			local canStart = rainbow.auto and #rainbow.pets > 0 and #queue < SHINY.MaxQueue
-				and pickBatch(data, SHINY.SourceTier, rainbow.pets, need, take) ~= nil
-			if ((rainbow.claim and #ready > 0) or canStart) and travelLock == 0 then
+			local active, pets, need, take = choice()
+			local canStart = active and #pets > 0 and #queue < SHINY.MaxQueue
+				and pickBatch(data, SHINY.SourceTier, pets, need, take) ~= nil
+			if (((rainbow.claim or cfg.full.on) and #ready > 0) or canStart) and travelLock == 0 then
 				local ok, err = visit(ready)
 				if not ok and err ~= "busy" then setState(tostring(err)) end
 				data = getData() or data
@@ -2397,13 +2461,17 @@ do
 				table.insert(slots, ("%d. %s"):format(i, left <= 0 and "Ready to claim" or ("ready in " .. TapChestConfig.FormatCountdown(left))))
 			end
 			setQueue(#slots > 0 and table.concat(slots, "\n") or ("All %d slots free"):format(SHINY.MaxQueue))
-			if not rainbow.auto then
-				setState(rainbow.claim and "Off (still claiming finished pets)" or "Off")
-			elseif #rainbow.pets == 0 then
+			if not active then
+				if cfg.full.on then
+					setState("Auto Full: nothing worth fusing")
+				else
+					setState(rainbow.claim and "Off (still claiming finished pets)" or "Off")
+				end
+			elseif #pets == 0 then
 				setState("Pick which Diamond pets to use")
 			elseif #queue >= SHINY.MaxQueue then
 				setState("All 3 slots busy")
-			elseif not pickBatch(data, SHINY.SourceTier, rainbow.pets, need, take) then
+			elseif not pickBatch(data, SHINY.SourceTier, pets, need, take) then
 				setState(("Waiting for %d spare Diamond copies of a chosen pet"):format(need))
 			end
 			pcall(function() madeStat:Set(rainbow.made) end)
@@ -2484,11 +2552,13 @@ task.spawn(function()
 		local data = getData()
 		if not data then continue end
 
-		if cfg.autoEquipBest then
-			local signature = petsSignature(data) .. ":" .. cfg.equipMode
+		if cfg.autoEquipBest or cfg.full.on then
+			-- Auto Full plays for coins, so its team is the best one for clicks.
+			local mode = cfg.full.on and "Clicks" or cfg.equipMode
+			local signature = petsSignature(data) .. ":" .. mode
 			if signature ~= lastSignature and os.clock() - lastEquipAt >= EQUIP_MIN_GAP then
 				lastSignature, lastEquipAt = signature, os.clock()
-				PetActionRequested:FireServer({ Action = "EquipBest", Mode = cfg.equipMode })
+				PetActionRequested:FireServer({ Action = "EquipBest", Mode = mode })
 			end
 		end
 
@@ -2574,8 +2644,10 @@ local function standNextToBreakable(target)
 	return false
 end
 
-STATE.connect(Remotes.BreakableService.RE.Rewarded.OnClientEvent, function()
+local lastBreakCoins = nil -- what the last breakable paid
+STATE.connect(Remotes.BreakableService.RE.Rewarded.OnClientEvent, function(r)
 	stats.chestsBroken += 1
+	if type(r) == "table" and type(r.Coins) == "number" then lastBreakCoins = r.Coins end
 end)
 
 -- One round: break every reachable breakable, nearest first, then go back.
@@ -2590,7 +2662,7 @@ local function breakRound(data)
 	travelLock += 1
 	local returnTo = character:GetPivot()
 	local skipped = {}
-	while cfg.autoBreak and STATE.alive() do
+	while (cfg.autoBreak or cfg.full.on) and STATE.alive() do
 		local nearest, nearestDist = nil, math.huge
 		for _, target in ipairs(breakableTargets(getData() or data)) do
 			if not skipped[target.model] then
@@ -2608,7 +2680,7 @@ local function breakRound(data)
 			local size = nearest.model:GetAttribute(attrs.Size)
 			local lastHealth = nearest.model:GetAttribute(attrs.Health)
 			local lastProgress = os.clock()
-			while breakableAlive(nearest.model) and cfg.autoBreak and os.clock() - lastProgress < 3 do
+			while breakableAlive(nearest.model) and (cfg.autoBreak or cfg.full.on) and os.clock() - lastProgress < 3 do
 				local rest = nearest.model:GetAttribute(attrs.Rest)
 				if typeof(rest) == "CFrame" and typeof(size) == "Vector3"
 					and not BreakableConfig.InRange(root.Position, rest, size) then
@@ -2635,11 +2707,22 @@ local function breakRound(data)
 	travelLock -= 1
 end
 
+-- Auto Full breaks them in rounds (they respawn about once a minute), and only while
+-- one still pays at least FULL_BREAK_WORTH seconds of income - early on that's always;
+-- later a round is just time away from the egg.
+local FULL_BREAK_EVERY = 45
+local FULL_BREAK_WORTH = 10
 task.spawn(function()
+	local fullNext = 0
 	while STATE.alive() and alive do
 		task.wait(1)
 		local data = getData()
-		if data and cfg.autoBreak then breakRound(data) end
+		local worth = lastBreakCoins == nil or lastBreakCoins >= (cfg.full.income or 0) * FULL_BREAK_WORTH
+		local fullTurn = cfg.full.on and worth and os.clock() >= fullNext
+		if data and (cfg.autoBreak or fullTurn) then
+			if fullTurn then fullNext = os.clock() + FULL_BREAK_EVERY end
+			breakRound(data)
+		end
 	end
 end)
 exports.breakableTargets = breakableTargets
@@ -2837,6 +2920,577 @@ end)
 exports.performance = { setBoost = setBoost, boosted = boosted, queueHub = queueHub }
 end
 
+---------------------------------------------------------------- Home: Auto Full
+do
+
+-- Auto Full plays the game by itself, from a fresh account to the last island. It runs
+-- the hub's own features (each checks cfg.full next to its own toggle) and makes the
+-- calls they can't make alone, every second, from the account's own data:
+--   coins  Spare coins go to rebirths. Coins are held back for the next hatch while
+--          hatching adds more than rebirthing would, and for the next island once it is
+--          a couple of minutes of income away (holding the price unlocks it; nothing is
+--          spent).
+--   eggs   The egg whose pets add the most power: per egg while hatching nonstop costs
+--          little next to income, per coin while coins are the limit.
+--   pets   Kinds worth crafting up (Golden -> Diamond -> Rainbow) go to the machines.
+--          Junk - pets that can never help - is deleted: at hatch, with the game's own
+--          per-egg auto-delete, and by a cleanup once storage fills up.
+--   free   Index rewards, potions, and the starter pet on a fresh account.
+-- "Power" is the game's own number (PetPower): the team is the EquipLimit strongest
+-- pets, and a pet or a craft only adds power if it beats the weakest of them.
+-- Everything lives in one function so its locals get their own register frame.
+
+local function startAutoFull()
+	local OnboardingConfig = require(ReplicatedStorage.Shared.Progression.OnboardingConfig)
+	local IslandConfig = require(ReplicatedStorage.Shared.Progression.IslandConfig)
+	local HatchRulesConfig = require(ReplicatedStorage.Shared.Pets.HatchRulesConfig)
+	local LaunchPetConfig = require(ReplicatedStorage.Shared.Pets.LaunchPetConfig)
+	local PetPower = require(ReplicatedStorage.Shared.Pets.PetPower)
+	local PetIndexCatalog = require(ReplicatedStorage.Shared.Pets.PetIndexCatalog)
+	local BoostConfig = require(ReplicatedStorage.Shared.Items.BoostConfig)
+	local PetActionRequested = Remotes.PetService.RE.PetActionRequested
+	local PetActionResult = Remotes.PetService.RE.PetActionResult
+	local AutoDeleteRequested = Remotes.EggService.RE.AutoDeleteRequested
+
+	local full = cfg.full
+	local ui = full.ui
+
+	local TIERS = { "Normal", "Golden", "Diamond", "Shiny" }
+	local TIER_POWER = { Normal = 1, Golden = 3, Diamond = 7, Shiny = 10 } -- PetPower's tier multipliers
+	local TIER_LABEL = { Normal = "", Golden = "Golden ", Diamond = "Diamond ", Shiny = "Rainbow " }
+	local PER_CRAFT = { Golden = 6, Diamond = 5, Shiny = 5 } -- pets of the tier below per sure craft
+	local MACHINE_FOR = { Normal = "Golden", Golden = "Diamond", Diamond = "Rainbow" } -- machine that crafts up from a tier
+	local SAVE_WINDOW = 120 -- save for the next island once it is this many seconds of income away
+	local CHEAP_SHARE = 0.3 -- hatching nonstop counts as cheap while it costs under this share of income
+	local HATCH_CYCLE = 3.3 -- seconds per hatch request (the server holds each reply ~2.4s)
+	local CLEANUP_AT = 0.85 -- clean up once storage is this full
+	local SPARE_TOP = 3 -- strongest pets kept on top of the team itself
+	local HATCH_DELETE_MARGIN = 1.5 -- at hatch, only delete what is junk by a wide margin
+	local SWITCH_TICKS = 5 -- a new egg choice must hold this many seconds before switching
+	local SECRET_RANK = HatchRulesConfig.RarityRank["Secret I"] or 6
+	local MYTHICAL_RANK = HatchRulesConfig.RarityRank.Mythical or 5
+
+	local banned = {} -- egg -> os.clock() until which it is skipped (the server refused it)
+	local income = 0 -- coins per second before spending, smoothed
+	local spent = 0 -- coins spent on rebirths and eggs since the script started
+
+	local function setText(handle, text)
+		pcall(function()
+			if handle.text ~= text then handle:Set(text) end
+		end)
+	end
+
+	local function basePower(name)
+		local def = LaunchPetConfig[name]
+		return def and def.Power or 0
+	end
+
+	local function rarityRank(pet)
+		local def = LaunchPetConfig[pet.Name]
+		return HatchRulesConfig.RarityRank[pet.Rarity or (def and def.Rarity)] or 0
+	end
+
+	local function petLabel(pet)
+		return (TIER_LABEL[pet.Tier] or (tostring(pet.Tier) .. " ")) .. tostring(pet.Name)
+	end
+
+	-- Tiers this account can craft: Golden from the start (there's a machine on Spawn),
+	-- Diamond once Crystal Cave is unlocked, Rainbow once Shadow Realm is.
+	local function openTiers(data)
+		local islands = data.Progression.UnlockedIslands
+		return { Golden = true, Diamond = islands["Crystal Cave"] == true, Shiny = islands["Shadow Realm"] == true }
+	end
+
+	-- The team: the EquipLimit strongest pets, by the game's own power numbers.
+	local function teamInfo(data)
+		local owned = data.Pets.Owned
+		local powers = PetPower.GetOwnedPowers(owned)
+		local ranked = {}
+		for id, power in pairs(powers) do table.insert(ranked, { id = id, power = power }) end
+		table.sort(ranked, function(a, b) return a.power > b.power end)
+		local size = data.Pets.EquipLimit or 1
+		local sum = 0
+		for i = 1, math.min(size, #ranked) do sum += ranked[i].power end
+		-- How far a pet's real power runs over its listed Power x tier (its size and
+		-- affinity), averaged over what's owned: used to size up pets not hatched yet.
+		local ratio, n = 0, 0
+		for id, pet in pairs(owned) do
+			local tier = TIER_POWER[pet.Tier]
+			if tier and (pet.Power or 0) > 0 and powers[id] then
+				ratio += powers[id] / (pet.Power * tier * (1 + (pet.Level or 0) / 199))
+				n += 1
+			end
+		end
+		return {
+			powers = powers,
+			ranked = ranked,
+			size = size,
+			full = #ranked >= size,
+			weakest = #ranked >= size and ranked[size].power or 0,
+			sum = math.max(sum, 1),
+			factor = n > 0 and math.clamp(ratio / n, 0.8, 1.6) or 1,
+		}
+	end
+
+	-- Rough power of a kind at a tier, for pets that don't exist yet.
+	local function estimate(name, tier, team)
+		return basePower(name) * (TIER_POWER[tier] or 1) * team.factor
+	end
+
+	-- The best tier this kind could be crafted up to from `tier`, through machines the
+	-- account can use, that would make the team; nil when no craft would help (or while
+	-- the team isn't full yet - every pet counts then).
+	local function craftGoal(name, tier, team, open)
+		if not team.full or basePower(name) <= 0 then return nil end
+		local from = table.find(TIERS, tier)
+		if not from then return nil end
+		local goal = nil
+		for i = from + 1, #TIERS do
+			local t = TIERS[i]
+			if not open[t] then break end
+			if estimate(name, t, team) > team.weakest then goal = t end
+		end
+		return goal
+	end
+
+	-- What one hatched pet of a kind is worth, in team power: what it adds by replacing
+	-- the weakest team pet, or its share of the best craft it can go into.
+	local function petValue(name, team, open)
+		local power = estimate(name, "Normal", team)
+		local best = math.max(0, power - team.weakest)
+		local copies = 1
+		for i = 2, #TIERS do
+			local t = TIERS[i]
+			if not open[t] then break end
+			copies *= PER_CRAFT[t]
+			best = math.max(best, (power * TIER_POWER[t] - team.weakest) / copies)
+		end
+		return best
+	end
+
+	local function eggValue(egg, team, open)
+		local pets = LaunchEggConfig[egg].Pets
+		local total, value = 0, 0
+		for _, weight in pairs(pets) do total += weight end
+		for name, weight in pairs(pets) do value += weight / total * petValue(name, team, open) end
+		return value
+	end
+
+	-- Income gained per coin by rebirthing, as a share of income: a rebirth adds 1 to
+	-- the (Rebirths + 1) multiplier for RebirthConfig.GetPrice(1, Rebirths) coins.
+	local function rebirthGain(data)
+		local r = data.Statistics.Rebirths or 0
+		return 1 / ((r + 1) * RebirthConfig.GetPrice(1, r))
+	end
+
+	-- The egg to hatch, or nil when rebirthing is the better use of coins.
+	-- An egg is in the running if its pets add more per coin than a rebirth does
+	-- (then it may take all the income), or if hatching it nonstop costs under
+	-- CHEAP_SHARE of income anyway. Of those, the one adding the most power per second
+	-- wins: hatch speed caps eggs per second, coins cap them too for pricey eggs.
+	-- (`rate` overrides the measured income, for trying the logic out.)
+	local function chooseEgg(data, team, open, rate)
+		rate = rate or income
+		local perHatch = (GamepassPerks.Has(data, "x8Egg") or BoostFormula.HasType(data, "OctoHatch")) and 8 or 3
+		local maxEggsPerSecond = perHatch / HATCH_CYCLE
+		local rebirth = rebirthGain(data)
+		local best = nil
+		for _, egg in ipairs(exports.availableEggs(data)) do
+			if (banned[egg.name] or 0) <= os.clock() then
+				local unit = EggPricing.GetUnitPrice(data, egg.name, egg.price)
+				local value = eggValue(egg.name, team, open)
+				if value > 0 and unit > 0 then
+					local beats = value / (team.sum * unit) >= rebirth
+					local cheap = unit * maxEggsPerSecond <= rate * CHEAP_SHARE
+					if beats or cheap then
+						local budget = beats and rate or rate * CHEAP_SHARE
+						-- (the floor keeps a ranking while income is still being measured)
+						local eggsPerSecond = math.min(maxEggsPerSecond, math.max(budget, 1e-9) / unit)
+						local entry = {
+							name = egg.name, unit = unit, value = value, perHatch = perHatch,
+							perSecond = value * eggsPerSecond,
+							why = beats and "beats rebirthing" or "cheap next to income",
+						}
+						if not best or entry.perSecond > best.perSecond then best = entry end
+					end
+				end
+			end
+		end
+		return best, best and best.why
+	end
+
+	local function nextIsland(data)
+		local island, price = exports.nextLockedIsland()
+		if not island then return nil end
+		local coins = data.Currencies.Coins or 0
+		local eta = coins >= price and 0 or (income > 0 and (price - coins) / income or math.huge)
+		return { name = island, price = price, eta = eta, saving = eta <= SAVE_WINDOW }
+	end
+
+	local function bestIsland(data)
+		local best, order = nil, -1
+		for name, def in pairs(IslandConfig.Islands) do
+			if data.Progression.UnlockedIslands[name] and def.Order > order then best, order = name, def.Order end
+		end
+		return best
+	end
+
+	-- Kinds worth crafting up, per machine.
+	local function craftPlan(data, team, open)
+		local plan = { Golden = {}, Diamond = {}, Rainbow = {} }
+		local seen = {}
+		for _, pet in pairs(data.Pets.Owned) do
+			local machine = MACHINE_FOR[pet.Tier]
+			local key = pet.Name .. "|" .. tostring(pet.Tier)
+			if machine and not seen[key] then
+				seen[key] = true
+				if rarityRank(pet) < SECRET_RANK and craftGoal(pet.Name, pet.Tier, team, open) then
+					table.insert(plan[machine], pet.Name)
+				end
+			end
+		end
+		for _, list in pairs(plan) do table.sort(list) end
+		return plan
+	end
+
+	-- Junk: pets that can never help. Not in the team or right behind it, not material
+	-- for a craft worth making, and not something to keep anyway: equipped, locked,
+	-- renamed, signed, in a trade, in a craft right now, Secret, or Mythical (while
+	-- "Keep Mythicals" is on). Weakest first.
+	local function junkPets(data, team, open)
+		if not team.full then return {} end
+		local keep = {}
+		for _, id in ipairs(data.Pets.Equipped or {}) do keep[id] = true end
+		for i = 1, math.min(#team.ranked, team.size + SPARE_TOP) do keep[team.ranked[i].id] = true end
+		local busy = full.craftUsed or {}
+		local goals = {}
+		local junk = {}
+		for id, pet in pairs(data.Pets.Owned) do
+			local rank = rarityRank(pet)
+			local kept = keep[id] or busy[id] or pet.Locked == true or pet.Frozen ~= nil
+				or pet.Signature ~= nil or (pet.Nickname ~= nil and pet.Nickname ~= pet.Name)
+				or rank >= SECRET_RANK or (full.keepMythical and rank >= MYTHICAL_RANK)
+				or (team.powers[id] or 0) > team.weakest
+			if not kept then
+				local key = pet.Name .. "|" .. tostring(pet.Tier)
+				if goals[key] == nil then goals[key] = craftGoal(pet.Name, pet.Tier, team, open) or false end
+				kept = goals[key] ~= false
+			end
+			if not kept then table.insert(junk, { id = id, pet = pet, power = team.powers[id] or 0 }) end
+		end
+		table.sort(junk, function(a, b) return a.power < b.power end)
+		return junk
+	end
+
+	local function describePets(list)
+		local counts, order = {}, {}
+		for _, entry in ipairs(list) do
+			local label = petLabel(entry.pet)
+			if not counts[label] then table.insert(order, label) end
+			counts[label] = (counts[label] or 0) + 1
+		end
+		local parts = {}
+		for i, label in ipairs(order) do
+			if i > 8 then
+				table.insert(parts, ("+%d more kinds"):format(#order - 8))
+				break
+			end
+			table.insert(parts, ("%dx %s"):format(counts[label], label))
+		end
+		return table.concat(parts, ", ")
+	end
+
+	-- Delete: the same request the inventory's delete sends (up to 400 per batch).
+	-- Batch numbers far above the game's own so its result handler ignores ours.
+	local deleteBatch = 900000
+	local function deletePets(list)
+		local ids = {}
+		for i = 1, math.min(#list, 400) do ids[i] = list[i].id end
+		if #ids == 0 then return 0 end
+		deleteBatch += 1
+		PetActionRequested:FireServer({ Action = "Delete", PetIds = ids, Batch = deleteBatch })
+		return #ids
+	end
+	STATE.connect(PetActionResult.OnClientEvent, function(r)
+		if type(r) == "table" and r.Action == "Delete" and type(r.Batch) == "number" and r.Batch > 900000 then
+			local skipped = tonumber(r.Skipped) or 0
+			activity("Auto Full", ("Deleted %s pets%s"):format(tostring(r.Count or 0),
+				skipped > 0 and (", skipped %d (%s)"):format(skipped, tostring(r.SkipReason or r.Error)) or ""))
+		end
+	end)
+
+	-- The game's own hatch auto-delete for the egg being hatched, so junk never takes a
+	-- slot. Only clear-cut kinds (judged on a size estimate with a wide margin); the
+	-- cleanup judges borderline pets by their real power. It only ever adds to the
+	-- egg's list, so anything you put there yourself stays.
+	local autoDeleteAt = {}
+	local function updateHatchDelete(data, egg, team, open)
+		if not team.full then return end
+		local current = (data.Eggs.AutoDelete or {})[egg]
+		local merged = type(current) == "table" and table.clone(current) or {}
+		local added = {}
+		for name in pairs(LaunchEggConfig[egg].Pets) do
+			local rank = rarityRank({ Name = name })
+			if rank < SECRET_RANK and not (full.keepMythical and rank >= MYTHICAL_RANK) then
+				for _, tier in ipairs(TIERS) do
+					local key = HatchRulesConfig.AutoDeleteKey(name, tier)
+					if not table.find(merged, key)
+						and estimate(name, tier, team) * HATCH_DELETE_MARGIN < team.weakest
+						and not craftGoal(name, tier, team, open) then
+						table.insert(merged, key)
+						table.insert(added, petLabel({ Name = name, Tier = tier }))
+					end
+				end
+			end
+		end
+		if #added == 0 or (autoDeleteAt[egg] or 0) > os.clock() then return end
+		autoDeleteAt[egg] = os.clock() + 20
+		AutoDeleteRequested:FireServer({ Egg = egg, Entries = merged })
+		activity("Auto Full", ("%s egg now auto-deletes at hatch: %s"):format(egg, table.concat(added, ", ")))
+	end
+
+	local function drinkPotion(data)
+		local active = data.ActiveBoosts or {}
+		for name, count in pairs(data.Boosts or {}) do
+			local def = BoostConfig.Definitions[name]
+			if type(count) == "number" and count > 0 and def and def.Duration and (active[name] or 0) < 5 then
+				local ok, res = pcall(function() return Remotes.BoostService.RF.Use:InvokeServer(name) end)
+				if ok and type(res) == "table" and res.Success then activity("Auto Full", "Drank " .. name) end
+				return
+			end
+		end
+	end
+
+	local function claimIndex(data)
+		local ok, list = pcall(PetIndexCatalog.Claimables, data.Pets)
+		if ok and type(list) == "table" and #list > 0 then
+			Remotes.PetIndexService.RE.ClaimAllRequested:FireServer()
+			activity("Auto Full", ("Claimed %d index reward%s"):format(#list, #list == 1 and "" or "s"))
+		end
+	end
+
+	-- Fresh account: pick the strongest starter pet once the intro allows it.
+	local function pickStarter(data)
+		local ok, can = pcall(OnboardingConfig.CanChooseStarterPet, data)
+		if not (ok and can) then return end
+		local best, bestPower = nil, -1
+		for _, name in ipairs(OnboardingConfig.StarterPets or {}) do
+			if basePower(name) > bestPower then best, bestPower = name, basePower(name) end
+		end
+		if not best then return end
+		local okCall, res = pcall(function() return Remotes.TutorialService.RF.ChooseStarterPet:InvokeServer({ Pet = best }) end)
+		local result = okCall and type(res) == "table" and (res.Success and "picked" or tostring(res.Reason)) or "no reply"
+		activity("Auto Full", ("Starter pet %s: %s"):format(best, result))
+	end
+
+	-- Refusals that pass on their own (the hatch loop just tries again) never count;
+	-- anything else three times running sets that egg aside for a minute.
+	local PASSING = { RateLimited = true, NotEnoughCoins = true, TooFar = true, Busy = true, Cooldown = true,
+		TooSoon = true, Pending = true, Locked = true, NotReady = true, Throttled = true }
+	local refusals = {}
+	function full.onHatchError(egg, reply)
+		local why = tostring(reply.Error or reply.Reason or "no reply")
+		if why == "StorageFull" then
+			full.storageFull = true
+			return
+		end
+		if PASSING[why] then return end
+		refusals[egg] = (refusals[egg] or 0) + 1
+		if refusals[egg] >= 3 then
+			refusals[egg] = 0
+			banned[egg] = os.clock() + 60
+			activity("Auto Full", ("%s egg refused (%s) - trying other eggs for a minute"):format(egg, why))
+		end
+	end
+
+	STATE.connect(RebirthResult.OnClientEvent, function(r)
+		if type(r) == "table" and r.Success and type(r.Price) == "number" then spent += r.Price end
+	end)
+	STATE.connect(EggHatchResult.OnClientEvent, function(r)
+		if type(r) == "table" and r.Success then
+			if type(r.Spent) == "number" then spent += r.Spent end
+			if type(r.Egg) == "string" then refusals[r.Egg] = 0 end
+		end
+	end)
+
+	local function countOf(t)
+		local n = 0
+		for _ in pairs(t) do n += 1 end
+		return n
+	end
+
+	local function eta(seconds)
+		if seconds == math.huge then return "not in reach yet" end
+		if seconds <= 0 then return "now" end
+		return TapChestConfig.FormatCountdown(seconds) .. " away"
+	end
+
+	-- Preview / Clean up now (buttons on the card), also while Auto Full is off.
+	local function handleRequest(data)
+		local request = full.request
+		full.request = nil
+		local team = teamInfo(data)
+		local junk = junkPets(data, team, openTiers(data))
+		if #junk == 0 then
+			activity("Auto Full", team.full and "Cleanup: nothing to delete, every pet is useful"
+				or "Cleanup: nothing to delete until the team is full")
+		elseif request == "cleanup" then
+			local n = deletePets(junk)
+			activity("Auto Full", ("Cleanup: deleting %d - %s"):format(n, describePets(junk)))
+		else
+			activity("Auto Full", ("Cleanup would delete %d - %s"):format(#junk, describePets(junk)))
+		end
+	end
+
+	local nextStarter, nextPotion, nextIndex, nextCleanup, nextTravel = 0, 0, 0, 0, 0
+	local candidate, candidateTicks = nil, 0
+
+	task.spawn(function()
+		local lastCoins, lastSpent, lastAt = nil, 0, os.clock()
+		while STATE.alive() and alive do
+			task.wait(1)
+			local data = getData()
+			if not data then continue end
+			local now = os.clock()
+			local coins = data.Currencies.Coins or 0
+
+			-- Income before spending, tracked even while off so it's ready when switched on.
+			if lastCoins then
+				local gross = math.max(0, (coins - lastCoins + (spent - lastSpent)) / math.max(now - lastAt, 0.01))
+				income = income == 0 and gross or income + (gross - income) * 0.2
+			end
+			lastCoins, lastSpent, lastAt = coins, spent, now
+			full.income = income
+
+			if full.request then pcall(handleRequest, data) end
+
+			if not full.on then
+				full.hatchEgg, full.reserve, full.hatchReserve = nil, 0, 0
+				candidate, candidateTicks = nil, 0
+				setText(ui.doing, "Off")
+				setText(ui.plan, "-")
+				continue
+			end
+
+			local ok, err = pcall(function()
+				local team = teamInfo(data)
+				local open = openTiers(data)
+
+				if now >= nextStarter then
+					nextStarter = now + 15
+					pickStarter(data)
+				end
+
+				-- Next island: hold its price once it's close (the worlds feature lands
+				-- on it the moment coins reach it).
+				local island = nextIsland(data)
+				full.reserve = island and island.saving and island.price or 0
+
+				-- Egg: switch only once a new choice has held for a few seconds.
+				local pick, why = chooseEgg(data, team, open)
+				local pickName = pick and pick.name or nil
+				if pickName ~= full.hatchEgg then
+					if pickName == candidate then
+						candidateTicks += 1
+					else
+						candidate, candidateTicks = pickName, 1
+					end
+					if candidateTicks >= SWITCH_TICKS or full.hatchEgg == nil and pickName ~= nil and candidateTicks >= 2 then
+						full.hatchEgg = pickName
+						activity("Auto Full", pickName and ("Hatching %s (%s)"):format(pickName, why) or "Stopped hatching: no egg pays off right now")
+					end
+				else
+					candidate, candidateTicks = nil, 0
+				end
+				local current = nil
+				if full.hatchEgg then
+					current = LaunchEggConfig[full.hatchEgg]
+					full.hatchReserve = current and EggPricing.GetUnitPrice(data, full.hatchEgg, current.Price) * (pick and pick.perHatch or 3) or 0
+				else
+					full.hatchReserve = 0
+				end
+
+				full.craft = craftPlan(data, team, open)
+
+				if full.deleteWeak and full.hatchEgg then updateHatchDelete(data, full.hatchEgg, team, open) end
+
+				local owned = countOf(data.Pets.Owned)
+				local limit = data.Pets.StorageLimit or 0
+				if full.deleteWeak and now >= nextCleanup and (full.storageFull or owned >= limit * CLEANUP_AT) then
+					nextCleanup = now + 10
+					full.storageFull = false
+					local junk = junkPets(data, team, open)
+					if #junk > 0 then
+						local n = deletePets(junk)
+						activity("Auto Full", ("Storage %d/%d: deleting %d weak pets - %s"):format(owned, limit, n, describePets(junk)))
+					end
+				end
+
+				if now >= nextPotion then
+					nextPotion = now + 20
+					drinkPotion(data)
+				end
+				if now >= nextIndex then
+					nextIndex = now + 30
+					claimIndex(data)
+				end
+
+				-- Not hatching: stand on the best island, whose multiplier every tap gets.
+				local best = bestIsland(data)
+				if not full.hatchEgg and best and data.Progression.Island ~= best and travelLock == 0 and now >= nextTravel then
+					nextTravel = now + 15
+					exports.travelTo(best)
+				end
+
+				-- Card text.
+				local doing
+				if cfg.autoMine then
+					doing = "Auto Mine is on and holds the character - switch it off"
+				elseif island and island.saving then
+					doing = ("Saving for %s: %s / %s"):format(island.name, abbreviate(coins), abbreviate(island.price))
+				elseif full.hatchEgg then
+					doing = ("Hatching %s, rebirthing with the rest"):format(full.hatchEgg)
+				else
+					doing = "Rebirthing (eggs don't pay off right now)"
+				end
+				setText(ui.doing, doing)
+
+				local craftParts = {}
+				for _, machine in ipairs({ "Golden", "Diamond", "Rainbow" }) do
+					if #full.craft[machine] > 0 then
+						table.insert(craftParts, ("%s: %s"):format(machine, table.concat(full.craft[machine], ", ")))
+					end
+				end
+				local lines = {
+					("Income: %s/s"):format(abbreviate(income)),
+					("Egg: %s"):format(full.hatchEgg and ("%s (%s)"):format(full.hatchEgg, why or "held") or "none"),
+					island and ("Next: %s, %s"):format(island.name, eta(island.eta)) or "All islands unlocked",
+					("Team: %d/%d, weakest %s"):format(math.min(#team.ranked, team.size), team.size, abbreviate(team.weakest)),
+					("Storage: %d/%d"):format(owned, limit),
+					#craftParts > 0 and ("Craft " .. table.concat(craftParts, "; ")) or "Craft: nothing worth it yet",
+				}
+				setText(ui.plan, table.concat(lines, "\n"))
+			end)
+			if not ok then setText(ui.doing, "Error: " .. tostring(err)) end
+		end
+	end)
+
+	-- For testing from the console.
+	exports.autoFull = {
+		team = teamInfo,
+		open = openTiers,
+		chooseEgg = chooseEgg,
+		junk = junkPets,
+		craftPlan = craftPlan,
+		eggValue = eggValue,
+		rebirthGain = rebirthGain,
+		income = function() return income end,
+	}
+end
+startAutoFull()
+
+end
+
 ---------------------------------------------------------------- tapping
 
 STATE.connect(TapResult.OnClientEvent, function(r)
@@ -2850,7 +3504,7 @@ end)
 -- instead of drifting the way a task.wait loop does.
 local nextTap = os.clock()
 STATE.connect(RunService.Heartbeat, function()
-	if not (cfg.enabled or breakingNow) then
+	if not (cfg.enabled or breakingNow or cfg.full.on) then
 		nextTap = os.clock()
 		return
 	end
@@ -2888,10 +3542,23 @@ task.spawn(function()
 			if not labelToIndex[cfg.rebirthChoice] then cfg.rebirthChoice = MAX_LABEL end
 		end
 
+		local coins = data.Currencies.Coins
 		local index = selectedIndex(count)
+		local affordable = true
+		if cfg.full.on then
+			-- Auto Full: the biggest button the spare coins cover. Coins it keeps for the
+			-- next hatch, or holds to unlock the next island, aren't spare.
+			local budget = coins - cfg.full.reserve - cfg.full.hatchReserve
+			index, affordable = count, false
+			for i = count, 1, -1 do
+				if RebirthConfig.GetPrice(RebirthConfig.GetAmountFromIndex(i), data.Statistics.Rebirths) <= budget then
+					index, affordable = i, true
+					break
+				end
+			end
+		end
 		local amount = RebirthConfig.GetAmountFromIndex(index)
 		local price = RebirthConfig.GetPrice(amount, data.Statistics.Rebirths)
-		local coins = data.Currencies.Coins
 
 		pcall(function()
 			local title = ("Target: +%s rebirths"):format(abbreviate(amount))
@@ -2906,7 +3573,7 @@ task.spawn(function()
 		end)
 
 		local now = os.clock()
-		if cfg.autoRebirth and coins >= price and not rebirthPending and now - lastFire >= REBIRTH_COOLDOWN then
+		if (cfg.autoRebirth or cfg.full.on) and affordable and coins >= price and not rebirthPending and now - lastFire >= REBIRTH_COOLDOWN then
 			lastFire = now
 			rebirthPending = true
 			RebirthRequested:FireServer({ Index = index })
@@ -2946,6 +3613,7 @@ task.spawn(function()
 		local function add(on, label)
 			if on then table.insert(running, label) end
 		end
+		add(cfg.full.on, "Auto Full")
 		add(cfg.enabled, ("Auto Tap (%.1f/s)"):format(rate))
 		add(cfg.autoBreak, "Auto Break")
 		add(cfg.autoRebirth, "Auto Rebirth")
